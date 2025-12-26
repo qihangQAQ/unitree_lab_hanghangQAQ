@@ -10,3 +10,16 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BasePPORunnerCfg",
     },
 )
+
+# 注册位置控制命令
+gym.register(
+    id="Unitree-G1-29dof-Position",
+    # entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    entry_point=f"{__name__}.position_env:LeggedRobotPosEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.position_env_cfg:RobotEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.position_env_cfg:RobotPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BasePPORunnerCfg",
+    },
+)
