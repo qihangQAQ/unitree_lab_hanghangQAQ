@@ -9,8 +9,15 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 @configclass
 class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
+
+    # ============== 新增wandb ===========
+    logger = "wandb"                            # ← 开启 wandb
+    wandb_project = "Unitree_g1_Velocity"       # ← wandb 项目名
+    run_name = "hanghangQAQ"                           # ← 自定义 run 名
+    # ===================================
+    
     num_steps_per_env = 24
-    max_iterations = 50000
+    max_iterations = 10000
     save_interval = 100
     experiment_name = ""  # same as task name
     empirical_normalization = False
