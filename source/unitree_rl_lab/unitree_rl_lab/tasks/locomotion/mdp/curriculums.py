@@ -4,6 +4,10 @@ import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from isaaclab.assets import Articulation
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.terrains import TerrainImporter
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -109,3 +113,46 @@ def position_cmd_levels(
 
     # 4) 返回当前“难度级别”，这里用最大前向距离表示
     return torch.tensor(ranges.pos_1[1], device=env.device)
+
+# pos的地形课程设计
+def terrain_levels_pos(
+    env: "ManagerBasedRLEnv",
+    env_ids: Sequence[int],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """位置任务的地形课程：根据“当前离目标有多近/多远”调整地形难度。
+
+    - 离目标很近（< sigma_tight）: move_up → 地形变难
+    - 离目标很远（> sigma_soft）: move_down → 地形变简单
+    """
+
+    # 1. 拿到机器人和地形句柄
+    asset: Articulation = env.scene[asset_cfg.name]
+    terrain: TerrainImporter = env.scene.terrain
+
+    # 2. 拿到 position 命令 term（注意这里是 term，不是 command 向量）
+    cmd_term = env.command_manager.get_term("position")
+
+    # 3. 当前 base 位置 & 目标位置（世界系 XY）
+    base_xy = asset.data.root_pos_w[:, :2]              # (num_envs, 2)
+    target_xy = cmd_term.position_targets[:, :2]        # (num_envs, 2)
+
+    # 只对传进来的 env_ids 算距离
+    distance = torch.norm(base_xy[env_ids] - target_xy[env_ids], dim=1)
+
+    # 4. 从你的位置奖励超参数里拿 sigma（你现在放在 env.cfg.pos_reward_params 里）
+    params = env.cfg.pos_reward_params
+    sigma_soft = params.position_target_sigma_soft
+    sigma_tight = params.position_target_sigma_tight
+
+    # 5. 课程规则：
+    #   - 足够靠近目标（< sigma_tight） → 升级地形
+    #   - 离目标明显很远（> sigma_soft）→ 降级地形
+    move_up = distance < sigma_tight
+    move_down = distance > sigma_soft
+
+    # 调用 IsaacLab 提供的 API 来更新 terrain_levels 和 env_origins
+    terrain.update_env_origins(env_ids, move_up, move_down)
+
+    # 返回这些 env 的平均地形等级（和原来的 velocity 版本保持一致）
+    return torch.mean(terrain.terrain_levels[env_ids].float())

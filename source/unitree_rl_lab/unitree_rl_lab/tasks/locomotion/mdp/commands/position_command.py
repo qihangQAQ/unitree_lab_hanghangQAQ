@@ -320,7 +320,7 @@ class UniformPositionCommand(CommandTerm):
         self._update_command()
 
 
-
+@configclass
 class UniformPositionCommandCfg(CommandTermCfg):
     
     class_type = UniformPositionCommand
@@ -350,3 +350,5 @@ class UniformPositionCommandCfg(CommandTermCfg):
         use_polar: bool = False
 
     ranges: Ranges = MISSING
+
+    limit_ranges: UniformPositionCommandCfg.Ranges = MISSING

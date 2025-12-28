@@ -31,7 +31,7 @@ def _quat_to_yaw(quat: torch.Tensor) -> torch.Tensor:
     yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
     return yaw
 
-def _wrap_to_pi(x: torch.Tensor) -> torch.Tensor:
+def wrap_to_pi(x: torch.Tensor) -> torch.Tensor:
     return (x + math.pi) % (2 * math.pi) - math.pi
 
 def quat_to_yaw(q: torch.Tensor) -> torch.Tensor:
@@ -526,7 +526,7 @@ def face_target_while_moving(
     # yaw = asset.data.root_yaw_w  # 如果你没有这个字段，用 root_quat_w 转 yaw
     yaw = quat_to_yaw(asset.data.root_quat_w)
 
-    yaw_err = _wrap_to_pi(desired_yaw - yaw)
+    yaw_err = wrap_to_pi(desired_yaw - yaw)
 
     # 只在“需要走路且还没到点”时启用
     move_mask = (distance > move_thresh).float()
@@ -659,3 +659,52 @@ def reach_pos_target_soft(
 
     # return base_rew * _command_duration_mask(env, command_name, params.rew_duration)
     return base_rew
+
+def foot_clearance_reward(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, target_height: float, std: float, tanh_mult: float
+) -> torch.Tensor:
+    """Reward the swinging feet for clearing a specified height off the ground"""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    foot_z_target_error = torch.square(asset.data.body_pos_w[:, asset_cfg.body_ids, 2] - target_height)
+    foot_velocity_tanh = torch.tanh(tanh_mult * torch.norm(asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2))
+    reward = foot_z_target_error * foot_velocity_tanh
+    return torch.exp(-torch.sum(reward, dim=1) / std)
+
+def foot_clearance_reward_position(
+    env: "ManagerBasedRLEnv",
+    asset_cfg: SceneEntityCfg,
+    target_height: float,
+    std: float,
+    tanh_mult: float,
+    command_name: str = "position",
+    stop_radius: float = 0.10,      # 10cm 内关闭
+    fade_band: float = 0.05,        # 软过渡带宽（可设 0 变成硬阈值）
+) -> torch.Tensor:
+    """Reward the feet for clearing a specified height off the ground.
+    Disabled when close to the position target (e.g. within 10 cm).
+    """
+    asset = env.scene[asset_cfg.name]
+
+    # 原 clearance shaping（你原封不动）
+    foot_z_target_error = torch.square(asset.data.body_pos_w[:, asset_cfg.body_ids, 2] - target_height)
+    foot_velocity_tanh = torch.tanh(
+        tanh_mult * torch.norm(asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2)
+    )
+    per_foot = foot_z_target_error * foot_velocity_tanh
+    base_reward = torch.exp(-torch.sum(per_foot, dim=1) / std)  # (num_envs,)
+
+    # --- 距离 gate：到目标 10cm 以内关闭 ---
+    cmd_term = env.command_manager.get_term(command_name)
+    target_xy = cmd_term.position_targets[:, :2]
+    base_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    distance = torch.norm(target_xy - base_xy, dim=1)  # (num_envs,)
+
+    if fade_band is None or fade_band <= 0.0:
+        # 硬阈值：<= stop_radius 直接 0
+        gate = (distance > stop_radius).float()
+    else:
+        # 软过渡：distance <= stop_radius -> 0
+        # distance >= stop_radius + fade_band -> 1
+        gate = torch.clamp((distance - stop_radius) / fade_band, 0.0, 1.0)
+
+    return base_reward * gate
