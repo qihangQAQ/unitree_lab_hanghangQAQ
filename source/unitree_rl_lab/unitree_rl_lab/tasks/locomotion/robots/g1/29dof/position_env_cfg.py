@@ -319,7 +319,7 @@ class RewardsCfg:
     # 1. 软位置追踪（到目标附近就给奖励）
     reach_pos_target_soft = RewTerm(
         func=mdp.reach_pos_target_soft,
-        weight=4.0,
+        weight=3.0,
         params={
             "command_name": "position",
             "asset_cfg": SceneEntityCfg("robot"),
@@ -329,7 +329,7 @@ class RewardsCfg:
     # 2. 硬位置追踪（更靠近目标的额外奖励）
     reach_pos_target_tight = RewTerm(
         func=mdp.reach_pos_target_tight,
-        weight=4.0,
+        weight=2.5,
         params={
             "command_name": "position",
             "asset_cfg": SceneEntityCfg("robot"),
@@ -358,7 +358,7 @@ class RewardsCfg:
     # 5.机器人到达目标后，要求它站稳、站姿好
     stand_still_pos = RewTerm(
         func=mdp.stand_still_pos,
-        weight=-1.2,   # 函数返回偏离量，所以这里是负号
+        weight=-1.5,   # 函数返回偏离量，所以这里是负号
         params={
             "command_name": "position",
             "asset_cfg": SceneEntityCfg("robot"),
@@ -386,7 +386,7 @@ class RewardsCfg:
     # 新增reward(行进过程朝向奖励，防止机器人背对期望位置走过去)
     face_target_while_moving = RewTerm(
         func=mdp.face_target_while_moving,
-        weight=1.5,  # 推荐 1.0~2.0，先用 1.5
+        weight=1.0,  # 推荐 1.0~2.0，先用 1.5
         params={
             "command_name": "position",
             "move_thresh": 0.4,
@@ -413,7 +413,7 @@ class RewardsCfg:
     # 手臂关节偏差惩罚
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.5,
+        weight=-0.1,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",

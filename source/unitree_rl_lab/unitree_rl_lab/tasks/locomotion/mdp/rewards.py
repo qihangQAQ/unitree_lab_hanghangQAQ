@@ -422,12 +422,13 @@ def stand_still_pos(
     dof_pos = asset.data.joint_pos
     default_dof_pos = asset.data.default_joint_pos
 
-    stand_bias = torch.zeros_like(dof_pos)
-    # 和参考项目保持同样的偏置模式（微微弯膝、下压小腿）
-    stand_bias[:, 1::3] += 0.2
-    stand_bias[:, 2::3] -= 0.3
+    # stand_bias = torch.zeros_like(dof_pos)
+    # # 和参考项目保持同样的偏置模式（微微弯膝、下压小腿）
+    # stand_bias[:, 1::3] += 0.2
+    # stand_bias[:, 2::3] -= 0.3
 
-    deviation = torch.sum(torch.abs(dof_pos - default_dof_pos - stand_bias), dim=1)
+    # deviation = torch.sum(torch.abs(dof_pos - default_dof_pos - stand_bias), dim=1)
+    deviation = torch.sum(torch.abs(dof_pos - default_dof_pos), dim=1)
 
     mask = _command_duration_mask(env, command_name, params.rew_duration / 2.0)
     near_tight = (distance < params.position_target_sigma_tight).float()
