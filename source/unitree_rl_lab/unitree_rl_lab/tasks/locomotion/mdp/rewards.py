@@ -709,3 +709,40 @@ def foot_clearance_reward_position(
         gate = torch.clamp((distance - stop_radius) / fade_band, 0.0, 1.0)
 
     return base_reward * gate
+
+def obstacle_collision(
+        env: ManagerBasedRLEnv,
+        threshold: float = 1.0,
+        sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+        command_name: str = "position",
+) -> torch.Tensor:
+    """针对障碍物的碰撞惩罚，仿照 legged_robot_pos 逻辑实现。
+
+    该奖励检测机器人非脚部部位的接触力，并在靠近目标点时显著放大惩罚，
+    迫使机器人为了获得高额的任务奖励而必须学会避障。
+    """
+    # 1. 获取接触传感器数据
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    # 2. 检测指定部位（通常是大腿、躯干等）的碰撞力是否超过阈值
+    # shape: (num_envs, history, body_ids, 3) -> 取历史记录中的最大力
+    net_contact_forces = contact_sensor.data.net_forces_w_history
+    # 计算力向量的模，并在历史维度和身体部位维度上寻找是否存在超过 threshold 的力
+    collision_detected = torch.max(
+        torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1),
+        dim=1
+    )[0] > threshold
+
+    # 转换为 0/1 浮点数，并求和（统计当前有多少个设定的部位发生了碰撞）
+    reward = torch.sum(collision_detected, dim=1).float()
+
+    # 3. 增强逻辑：如果距离目标点很近（进入了 tight 区域）发生碰撞，惩罚翻倍
+    # 参考了你 rewards.py 中 _reward_termination 的逻辑
+    cmd_term = env.command_manager.get_term(command_name)
+    params = env.cfg.pos_reward_params
+
+    distance = torch.norm(cmd_term.position_targets[:, :2] - env.scene["robot"].data.root_pos_w[:, :2], dim=1)
+    near_goal = (distance < params.position_target_sigma_tight).float()
+
+    # 靠近目标时碰撞惩罚增加（例如 5 倍），防止机器人在最后一刻为了冲向目标而撞击障碍物
+    return reward * (1.0 + 4.0 * near_goal)

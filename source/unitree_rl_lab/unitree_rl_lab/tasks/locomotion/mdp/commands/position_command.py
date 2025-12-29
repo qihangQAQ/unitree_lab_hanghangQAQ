@@ -106,78 +106,176 @@ class UniformPositionCommand(CommandTerm):
                 },
             )
         )
+
+        # --- 2D 射线参数设置 ---
+        self.ray_max_dist = 6.0
+        self.ray_num = 11
+        # 生成 -45 到 45.1 度的 11 条射线
+        self.ray_thetas = torch.linspace(-torch.pi / 4, torch.pi / 4 + 0.0017, self.ray_num, device=self.device)
+        self.ray_obs = torch.ones(self.num_envs, self.ray_num, device=self.device) * self.ray_max_dist
+
+        # 传感器安装偏置 (机器人的基座)
+        self.ray_x0 = 0.1  # 基座前方 10cm
+        self.ray_y0 = 0.0
+
+        # 射线可视化 Marker (每条线上 8 个小球)
+        self.ray_visualizer = VisualizationMarkers(
+            VisualizationMarkersCfg(
+                prim_path="/Visuals/Command/ray_dots",
+                markers={
+                    "dot": sim_utils.SphereCfg(
+                        radius=0.03,
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0))  # 青色
+                    )
+                }
+            )
+        )
     
+    # def _resample_command(self, env_ids: Sequence[int]):
+    #     num = len(env_ids)
+    #     if num == 0:
+    #         return
+    #     # === 1.随机位置生成 ====
+    #
+    #     pos1 = torch.empty(num, 1, device=self.device).uniform_(*self.cfg.ranges.pos_1)
+    #     pos2 = torch.empty(num, 1, device=self.device).uniform_(*self.cfg.ranges.pos_2)
+    #
+    #     # 随机偏置位置生成
+    #     if self.cfg.ranges.heading is not None:
+    #         heading_offset = torch.empty(num, 1, device=self.device).uniform_(
+    #             *self.cfg.ranges.heading
+    #         )
+    #     else:
+    #         # 不用额外偏置就设为 0
+    #         heading_offset = torch.zeros(num, 1, device=self.device)
+    #
+    #     # === 2.计算目标位置 position_targets (世界系) ===
+    #
+    #     # #这里写错了，这里用的是第一次的初始位置
+    #     # 而不是每次reset之后，机器人的初始位置
+    #     # env_origins = self.env_origins[env_ids]
+    #     # 矫正
+    #     env_origins = self.robot.data.root_pos_w[env_ids].clone()
+    #
+    #     # 计算期望位置相对初始的偏移
+    #     self.position_targets[env_ids, 0:1] = env_origins[:, 0:1] + pos1
+    #     self.position_targets[env_ids, 1:2] = env_origins[:, 1:2] + pos2
+    #     self.position_targets[env_ids, 2] = env_origins[:, 2] + 0.0
+    #
+    #     # === 3) 计算 heading_target （世界系 yaw） ===
+    #
+    #     root_pos_w = self.robot.data.root_pos_w[env_ids, :3]
+    #     pos_diff = self.position_targets[env_ids] - root_pos_w
+    #
+    #     # 指向目标点的“基础朝向”
+    #     base_heading_to_target = torch.atan2(pos_diff[:, 1:2], pos_diff[:, 0:1])  # (num, 1)
+    #
+    #     # 最终目标 heading = 指向目标的朝向 + 一个随机偏置
+    #     heading_target = base_heading_to_target + heading_offset
+    #
+    #     # wrap 到 [-pi, pi]
+    #     self.heading_target[env_ids] = math_utils.wrap_to_pi(heading_target[:, 0])
+    #
+    #     # === 2. 画球 ===
+    #     self._debug_vis_callback()
+    #
+    #     # === 3. 画圆锥箭头（期望朝向） ===
+    #     self._debug_vis_heading_callback()
+    #
+    #     # === 4) 设定位置命令 ===
+    #     # 写到update_command中
+    #
+    #     # # 世界系下的当前位置 / 姿态
+    #     # root_pos_w = self.robot.data.root_pos_w[env_ids, :3]    # (n, 3)
+    #     # root_quat_w = self.robot.data.root_quat_w[env_ids]      # (n, 4)
+    #     # current_heading = self.robot.data.heading_w[env_ids]    # (n,)
+    #
+    #     # # 位置误差（世界系）
+    #     # pos_diff_w = self.position_targets[env_ids] - root_pos_w  # (n, 3)
+    #
+    #     # # 转到 base frame
+    #     # pos_diff_b = math_utils.quat_rotate_inverse(root_quat_w, pos_diff_w)  # (n, 3)
+    #
+    #     # # 写入 x, y 误差
+    #     # self.pos_command_b[env_ids, 0:2] = pos_diff_b[:, 0:2]
+    #
+    #     # # heading 误差
+    #     # heading_err = math_utils.wrap_to_pi(self.heading_target[env_ids] - current_heading)
+    #     # self.pos_command_b[env_ids, 2] = heading_err
+
     def _resample_command(self, env_ids: Sequence[int]):
         num = len(env_ids)
         if num == 0:
             return
-        # === 1.随机位置生成 ====
 
+        # 1. 采样基础位置和朝向 (回归到 1-7m 的稳定范围)
         pos1 = torch.empty(num, 1, device=self.device).uniform_(*self.cfg.ranges.pos_1)
         pos2 = torch.empty(num, 1, device=self.device).uniform_(*self.cfg.ranges.pos_2)
-        
-        # 随机偏置位置生成
-        if self.cfg.ranges.heading is not None:
-            heading_offset = torch.empty(num, 1, device=self.device).uniform_(
-                *self.cfg.ranges.heading
-            )
-        else:
-            # 不用额外偏置就设为 0
-            heading_offset = torch.zeros(num, 1, device=self.device)
-        
-        # === 2.计算目标位置 position_targets (世界系) ===
 
-        # #这里写错了，这里用的是第一次的初始位置
-        # 而不是每次reset之后，机器人的初始位置
-        # env_origins = self.env_origins[env_ids]
-        # 矫正
-        env_origins = self.robot.data.root_pos_w[env_ids].clone()
+        # 2. 锁定起点(当前机器人位置)
+        root_pos_w = self.robot.data.root_pos_w[env_ids].clone()
+        env_origins = root_pos_w.clone()
 
-        # 计算期望位置相对初始的偏移
-        self.position_targets[env_ids, 0:1] = env_origins[:, 0:1] + pos1
-        self.position_targets[env_ids, 1:2] = env_origins[:, 1:2] + pos2
-        self.position_targets[env_ids, 2] = env_origins[:, 2] + 0.0
+        # 3. 计算目标位置并更新 Buffer
+        target_pos_w = torch.zeros(num, 3, device=self.device)
+        target_pos_w[:, 0] = env_origins[:, 0] + pos1.squeeze()
+        target_pos_w[:, 1] = env_origins[:, 1] + pos2.squeeze()
+        target_pos_w[:, 2] = env_origins[:, 2]
+        self.position_targets[env_ids] = target_pos_w
 
-        # === 3) 计算 heading_target （世界系 yaw） ===
+        # 更新朝向目标
+        pos_diff = self.position_targets[env_ids] - root_pos_w[:, :3]
+        base_heading = torch.atan2(pos_diff[:, 1], pos_diff[:, 0])
+        self.heading_target[env_ids] = math_utils.wrap_to_pi(base_heading)
 
-        root_pos_w = self.robot.data.root_pos_w[env_ids, :3]
-        pos_diff = self.position_targets[env_ids] - root_pos_w
-        
-        # 指向目标点的“基础朝向”
-        base_heading_to_target = torch.atan2(pos_diff[:, 1:2], pos_diff[:, 0:1])  # (num, 1)
+        # 4. 障碍物高级生成逻辑 (含 2m 安全区检测)
+        obs_names = ["obstacle_box_0", "obstacle_cylinder_0"]
 
-        # 最终目标 heading = 指向目标的朝向 + 一个随机偏置
-        heading_target = base_heading_to_target + heading_offset
+        for name in obs_names:
+            if name not in self._env.scene.keys(): continue
+            obj = self._env.scene[name]
 
-        # wrap 到 [-pi, pi]
-        self.heading_target[env_ids] = math_utils.wrap_to_pi(heading_target[:, 0])
+            # --- 核心修改：基于概率和距离的生成控制 ---
+            # 采样插值比例 t (路径的 20% - 80%)
+            t = torch.rand(num, 1, device=self.device) * 0.6 + 0.2
 
-        # === 2. 画球 ===
+            # 计算路径上的潜在位置
+            path_vec = target_pos_w[:, :2] - env_origins[:, :2]
+            potential_obs_pos = env_origins[:, :2] + path_vec * t
+
+            # 检测该点与机器人的距离
+            dist_to_robot = torch.norm(potential_obs_pos - env_origins[:, :2], dim=1)
+
+            # 判定掩码：距离机器人 > 2m 且 距离终点 > 0.5m 才视为有效位置
+            # 如果不满足，则将该环境下的障碍物“扔掉”
+            is_safe = (dist_to_robot > 2.0) & (torch.norm(potential_obs_pos - target_pos_w[:, :2], dim=1) > 0.5)
+
+            # 准备物理状态
+            root_state = obj.data.default_root_state[env_ids].clone()
+
+            # 最终位置分配
+            final_pos = torch.zeros(num, 3, device=self.device)
+
+            # 如果安全，放在路径上；如果不安全，扔到地下 -100m 处
+            # 这样 2D 射线传感器（即便向下看）也绝对扫不到它
+            final_pos[:, :2] = torch.where(is_safe.unsqueeze(1), potential_obs_pos,
+                                           torch.tensor([1000.0, 1000.0], device=self.device))
+            final_pos[:, 2] = torch.where(is_safe, torch.tensor(0.6, device=self.device),
+                                          torch.tensor(-100.0, device=self.device))
+
+            # 只有在安全的情况下才加横向抖动，否则扔远了没意义
+            y_noise = (torch.rand(num, device=self.device) - 0.5) * 1.6
+            final_pos[is_safe, 1] += y_noise[is_safe]
+
+            root_state[:, :3] = final_pos
+
+            # 强制写入物理引擎
+            obj.write_root_state_to_sim(root_state, env_ids=env_ids)
+
         self._debug_vis_callback()
-
-        # === 3. 画圆锥箭头（期望朝向） ===
         self._debug_vis_heading_callback()
 
-        # === 4) 设定位置命令 ===
-        # 写到update_command中
 
-        # # 世界系下的当前位置 / 姿态
-        # root_pos_w = self.robot.data.root_pos_w[env_ids, :3]    # (n, 3)
-        # root_quat_w = self.robot.data.root_quat_w[env_ids]      # (n, 4)
-        # current_heading = self.robot.data.heading_w[env_ids]    # (n,)
-
-        # # 位置误差（世界系）
-        # pos_diff_w = self.position_targets[env_ids] - root_pos_w  # (n, 3)
-
-        # # 转到 base frame
-        # pos_diff_b = math_utils.quat_rotate_inverse(root_quat_w, pos_diff_w)  # (n, 3)
-
-        # # 写入 x, y 误差
-        # self.pos_command_b[env_ids, 0:2] = pos_diff_b[:, 0:2]
-
-        # # heading 误差
-        # heading_err = math_utils.wrap_to_pi(self.heading_target[env_ids] - current_heading)
-        # self.pos_command_b[env_ids, 2] = heading_err
 
     def _update_command(self):
         """每个 step 调用：根据当前状态实时计算 [x_err, y_err, heading_err]."""
@@ -199,6 +297,32 @@ class UniformPositionCommand(CommandTerm):
         # 如果有 standing_env，可以在这里置 0
         standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
         self.pos_command_b[standing_env_ids, :] = 0.0
+
+        # --- 手搓射线逻辑 ---
+        # 1. 初始化距离
+        self.ray_obs[:] = self.ray_max_dist
+
+        # 2. 遍历场景中的障碍物 (Box 和 Cylinder)
+        obs_names = ["obstacle_box_0", "obstacle_cylinder_0"]
+        for name in obs_names:
+            if name not in self._env.scene.keys(): continue
+            obj = self._env.scene[name]
+
+            # 获取物体相对于机器人的位置 (Local Frame)
+            obj_pos_w = obj.data.root_pos_w[:, :3]
+            obj_rel_pos_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w,
+                                                          obj_pos_w - self.robot.data.root_pos_w[:, :3])
+
+            # 调用数学查询 (简化处理：Box 也当做半径 0.4 的圆柱处理，或根据需求微调半径)
+            radius = 0.4 if "box" in name else 0.25
+            dist = self.circle_ray_query(self.ray_x0, self.ray_y0, self.ray_thetas, obj_rel_pos_b[:, :2], radius,
+                                         self.ray_max_dist)
+
+            # 取最近距离
+            self.ray_obs = torch.minimum(self.ray_obs, dist)
+
+        # 调用可视化
+        self._debug_vis_rays_callback()
 
 
 
@@ -318,6 +442,70 @@ class UniformPositionCommand(CommandTerm):
 
         # 更新命令（位置误差）
         self._update_command()
+
+    def circle_ray_query(self,ray_x0, ray_y0, ray_thetas, obj_rel_pos, radius, max_dist):
+        """
+        数学手搓：计算从 (ray_x0, ray_y0) 发出的射线与圆心在 obj_rel_pos、半径为 radius 的圆的交点距离
+        """
+        # 转换为相对于射线的坐标
+        dx = obj_rel_pos[:, 0:1] - ray_x0
+        dy = obj_rel_pos[:, 1:2] - ray_y0
+
+        # 计算射线方向向量
+        cos_t = torch.cos(ray_thetas)
+        sin_t = torch.sin(ray_thetas)
+
+        # 计算投影距离
+        dist_projection = dx * cos_t + dy * sin_t
+
+        # 计算垂直距离平方
+        dist_perpendicular_sq = dx ** 2 + dy ** 2 - dist_projection ** 2
+
+        # 检查是否相交
+        radius_sq = radius ** 2
+        intersect = (dist_perpendicular_sq <= radius_sq) & (dist_projection > 0)
+
+        # 计算交点距离
+        offset = torch.sqrt(torch.clamp(radius_sq - dist_perpendicular_sq, min=0))
+        dist = dist_projection - offset
+
+        # 裁剪范围
+        return torch.where(intersect & (dist < max_dist), dist, torch.tensor(max_dist, device=dist.device))
+
+    def _debug_vis_rays_callback(self):
+        """在每条射线上沿距离画 8 个点"""
+        if not self.robot.is_initialized: return
+
+        # 每条射线画 8 个点，一共 num_envs * 11 * 8 个 Marker
+        num_dots_per_ray = 8
+        total_dots = self.num_envs * self.ray_num * num_dots_per_ray
+
+        # 计算所有点在机器人坐标系下的位置
+        # 生成线性的比例 [0.1, 0.2, ..., 1.0]
+        dot_scales = torch.linspace(0.1, 1.0, num_dots_per_ray, device=self.device)
+
+        # 计算点在 Body 系下的 XY
+        # (num_envs, ray_num, 8)
+        current_ray_dist = self.ray_obs.unsqueeze(-1) * dot_scales  # 距离按比例分布
+
+        # 计算 X, Y (Body Frame)
+        dot_x_b = self.ray_x0 + current_ray_dist * torch.cos(self.ray_thetas).unsqueeze(-1)
+        dot_y_b = self.ray_y0 + current_ray_dist * torch.sin(self.ray_thetas).unsqueeze(-1)
+        dot_z_b = torch.zeros_like(dot_x_b) + 0.1  # 离地 10cm
+
+        dots_b = torch.stack([dot_x_b, dot_y_b, dot_z_b], dim=-1)  # (N, 11, 8, 3)
+
+        # 转换到世界坐标系
+        # 铺平为 (Total, 3) 方便计算
+        dots_b_flat = dots_b.view(-1, 3)
+        # 重复 root 状态以匹配点数
+        root_pos_w = self.robot.data.root_pos_w.repeat_interleave(self.ray_num * num_dots_per_ray, dim=0)
+        root_quat_w = self.robot.data.root_quat_w.repeat_interleave(self.ray_num * num_dots_per_ray, dim=0)
+
+        dots_w = math_utils.quat_apply(root_quat_w, dots_b_flat) + root_pos_w[:, :3]
+
+        # 可视化
+        self.ray_visualizer.visualize(dots_w)
 
 
 @configclass

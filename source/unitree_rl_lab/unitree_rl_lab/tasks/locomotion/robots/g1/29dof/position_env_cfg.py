@@ -9,6 +9,8 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.assets import RigidObjectCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns,CameraCfg
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
@@ -88,6 +90,32 @@ class RobotSceneCfg(InteractiveSceneCfg):
             texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
         ),
     )
+
+    # 障碍设置
+    # ================= 1. 一个长方体 (Box) =================
+    obstacle_box_0 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Box_0",
+        spawn=sim_utils.CuboidCfg(
+            size=(1.0, 0.2, 0.5), # 比如这是一个横着的长条
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)), # 红
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)), # 初始先扔远点，等 reset 再拉回来
+    )
+
+    # ================= 2. 一个圆柱体 (Cylinder) [你的第7个物体] =================
+    obstacle_cylinder_0 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Cylinder_0",
+        spawn=sim_utils.CylinderCfg(
+            radius=0.25, height=0.8,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.8, 0.1)), # 黄
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
 
 
 @configclass
@@ -237,6 +265,14 @@ class ObservationsCfg:
         # 新增2.剩余时长
         time_left = ObsTerm(func=mdp.command_time_left,params={"command_name": "position"})
 
+        # 新增：射线感知
+        ray2d_scan = ObsTerm(
+            func=mdp.ray2d_distances,
+            params={"command_name": "position"},
+            # 仿照 Go1 的 noise_scales.ray2d，添加 0.2 程度的噪声
+            noise=Unoise(n_min=-0.1, n_max=0.1)
+        )
+
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})# 步态相位（已注释）
 
         def __post_init__(self):
@@ -273,6 +309,14 @@ class ObservationsCfg:
         #     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
         #     clip=(-1.0, 5.0),
         # )
+
+        # 新增：射线感知
+        ray2d_scan = ObsTerm(
+            func=mdp.ray2d_distances,
+            params={"command_name": "position"},
+            # 仿照 Go1 的 noise_scales.ray2d，添加 0.2 程度的噪声
+            noise=Unoise(n_min=-0.1, n_max=0.1)
+        )
 
         def __post_init__(self):
             self.history_length = 5# 历史长度
@@ -494,6 +538,18 @@ class RewardsCfg:
         params={
             "threshold": 1,
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+        },
+    )
+
+    #碰撞惩罚
+    obstacle_collision = RewTerm(
+        func=mdp.obstacle_collision,
+        weight=-8.0,  # 初始建议给予较大的负权重
+        params={
+            "threshold": 1.0,
+            # 排除脚部(ankle)，只检测躯干和大腿
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+            "command_name": "position",
         },
     )
 

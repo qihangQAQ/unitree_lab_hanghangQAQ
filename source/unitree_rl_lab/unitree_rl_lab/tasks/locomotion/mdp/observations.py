@@ -27,3 +27,22 @@ def command_time_left(env: ManagerBasedRLEnv,command_name: str = "position") -> 
     max_time = getattr(term.cfg, "max_goal_time_s", term.cfg.resampling_time_range[1])
     max_time = float(max_time) if max_time > 0.0 else 1.0
     return (time_left / max_time).unsqueeze(1)
+
+def ray2d_distances(env: ManagerBasedRLEnv, command_name: str = "position") -> torch.Tensor:
+    """机器人基座发出的 2D 射线距离观测。
+
+    该函数从指定的 CommandTerm 中提取计算好的射线距离（ray_obs）。
+    通常用于避障任务。
+    """
+    # 1. 获取包含射线逻辑的命令管理器 term
+    term = env.command_manager.get_term(command_name)
+
+    # 2. 获取我们在 UniformPositionCommand 中定义的 ray_obs (shape: [num_envs, 11])
+    # 注意：这里需要确保你的 UniformPositionCommand 类里有 ray_obs 这个属性
+    ray_obs = term.ray_obs
+
+    # 3. 仿照 legged_robot_pos 的归一化/缩放逻辑（可选）
+    # 如果你在配置里设置了 log2 缩放，可以在这里处理
+    # return torch.log2(ray_obs)
+
+    return ray_obs
