@@ -19,6 +19,8 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.sensors import CameraCfg
+from isaaclab.sim import PinholeCameraCfg  # 引入针孔相机配置
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
@@ -115,7 +117,36 @@ class RobotSceneCfg(InteractiveSceneCfg):
         ),
         init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
     )
+    # ================= 修改后的深度相机配置 =================
+    depth_camera = CameraCfg(
+        # 1. 修改挂载点为 torso_link
+        prim_path="{ENV_REGEX_NS}/Robot/torso_link/depth_cam",
 
+        update_period=0.1,
+        height=80,
+        width=128,
+        data_types=["distance_to_image_plane"],
+
+        spawn=PinholeCameraCfg(
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 5.0),
+        ),
+
+        # 2. 调整偏移量 (模拟头部位置)
+        offset=CameraCfg.OffsetCfg(
+            # pos=(x, y, z)
+            # x=0.2: 向前伸 20cm (避免被胸部挡住)
+            # y=0.0: 居中
+            # z=0.5: 向上抬 50cm (假设 torso 原点在腰部，这个值需要您根据实测微调)
+            pos=(0.25, 0.0, 0.2),
+
+            # 保持 ROS 坐标系
+            rot=(1.0, 0.0, 0.0, 0.0),
+            convention="world",
+        ),
+    )
 
 
 @configclass

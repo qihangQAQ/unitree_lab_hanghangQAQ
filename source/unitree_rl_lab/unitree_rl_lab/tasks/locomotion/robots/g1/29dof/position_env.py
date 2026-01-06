@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 import gymnasium as gym
 from isaaclab.envs.manager_based_rl_env import ManagerBasedRLEnv
 from isaaclab.utils import configclass
+from isaaclab.sensors import ContactSensor
+from isaaclab.assets import Articulation
 
 if TYPE_CHECKING:
     from .position_env_cfg import RobotEnvCfg
