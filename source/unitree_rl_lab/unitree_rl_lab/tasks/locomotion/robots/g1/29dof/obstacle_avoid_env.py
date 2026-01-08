@@ -6,12 +6,13 @@ from isaaclab.envs.manager_based_rl_env import ManagerBasedRLEnv
 from isaaclab.utils import configclass
 from isaaclab.sensors import ContactSensor
 from isaaclab.assets import Articulation
+from isaaclab.managers import SceneEntityCfg  # 引入需要的配置类
 
 if TYPE_CHECKING:
     from .position_env_cfg import RobotEnvCfg
 
 
-class LeggedRobotPosEnv(ManagerBasedRLEnv):
+class LeggedRobotPosNp3oEnv(ManagerBasedRLEnv):
     """位置命令专用环境类，继承自ManagerBasedRLEnv，添加环境级计时器"""
 
     cfg: 'RobotEnvCfg'  # 类型注解
@@ -20,21 +21,20 @@ class LeggedRobotPosEnv(ManagerBasedRLEnv):
         """初始化位置命令环境"""
         # 调用父类初始化
         super().__init__(cfg=cfg, render_mode=render_mode, **kwargs)
-        
+
         # ==================== 新增：缓存非脚部刚体的索引 ====================
         # 获取接触传感器实例
         contact_sensor = self.scene.sensors["contact_forces"]
-        
+
         # 获取所有被该传感器监听的刚体名称列表
         all_body_names = contact_sensor.body_names
-        
+
         # 筛选出不包含 "ankle" (或 foot/toe，取决于你的URDF命名) 的刚体索引
-        # 假设你的脚部链接名字里带有 "ankle"
         self.non_foot_body_indices = [
-            i for i, name in enumerate(all_body_names) 
+            i for i, name in enumerate(all_body_names)
             if "ankle" not in name and "foot" not in name
         ]
-        
+
         # 转为 Tensor 方便后续在 step 中进行切片索引
         self.non_foot_body_indices = torch.tensor(
             self.non_foot_body_indices, device=self.device, dtype=torch.long
@@ -44,14 +44,8 @@ class LeggedRobotPosEnv(ManagerBasedRLEnv):
         # =================================================================
 
     def step(self, action: torch.Tensor):
-        """单步仿真 + 终止 + 重置 + 命令更新。
+        """单步仿真 + 终止 + 重置 + 命令更新 + Cost计算。"""
 
-        逻辑几乎完全照抄 ManagerBasedRLEnv.step，
-        唯一的区别是最后一行：调用 self.command_manager.compute_position(...)。
-
-        仿照ABS的逻辑写了一个新的step,这个step的逻辑和managerbasedrlenv中的不太一样
-        """
-        
         # 1) 处理动作
         self.action_manager.process_action(action.to(self.device))
         self.recorder_manager.record_pre_step()
@@ -81,10 +75,8 @@ class LeggedRobotPosEnv(ManagerBasedRLEnv):
         self.common_step_counter += 1  # 全局步数
 
         # 更新命令
-        # 相当于post_physics_step_callback
         self.command_manager.compute(dt=self.step_dt)
         # step 间隔事件（例如外力、干扰等）
-        # 推力干扰
         if "interval" in self.event_manager.available_modes:
             self.event_manager.apply(mode="interval", dt=self.step_dt)
 
@@ -96,14 +88,40 @@ class LeggedRobotPosEnv(ManagerBasedRLEnv):
         # 计算奖励
         self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
 
+        # ===================== 新增：计算约束成本 (Costs) =========================
+        # 这里集中计算所有的 Cost，并汇总到一个 Tensor 中
+        # 假设我们有两个约束：关节限位 (Joint Limits) 和 碰撞 (Collision)
+
+        # 1. 计算各项具体的 Cost
+        joint_limit_cost = self._compute_joint_pos_cost()
+        collision_cost = self._compute_obstacle_collision_cost()
+
+        # 2. 将它们存入 extras，供 Runner 读取
+        # 注意：extras["costs"] 的 key 必须是固定的，Runner 会找这个 key
+        # 我们将各项 Cost 叠加，或者分别存储。
+        # N-P3O 通常处理标量 Cost Sum，也可以处理向量 Cost。
+        # 这里简单起见，我们把它们加起来作为总 Cost 信号。
+        # 如果你想分别看，可以存到 extras["log"] 里。
+
+        total_cost = joint_limit_cost + collision_cost
+
+        # 存入 extras，Runner 的 process_env_step 会读取它
+        self.extras["cost"] = total_cost
+
+        # 可选：记录详细信息用于 WandB 展示
+        self.extras["log"] = self.extras.get("log", {})
+        self.extras["log"]["Cost/joint_limits"] = joint_limit_cost.mean()
+        self.extras["log"]["Cost/collision"] = collision_cost.mean()
+        self.extras["log"]["Cost/total"] = total_cost.mean()
+        # =========================================================================
+
         #  重置需要 reset 的 env
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:
             # reset 前记录
             self.recorder_manager.record_pre_reset(reset_env_ids)
 
-            # 调用环境自己的 _reset_idx（这里会触发 command_manager.reset，
-            # 从而重采样 position 命令）
+            # 调用环境自己的 _reset_idx
             self._reset_idx(reset_env_ids)
 
             # # 重置后重新渲染
@@ -121,7 +139,6 @@ class LeggedRobotPosEnv(ManagerBasedRLEnv):
         # 计算观测
         self.obs_buf = self.observation_manager.compute(update_history=True)
 
-        # return 
         return (
             self.obs_buf,
             self.reward_buf,
@@ -129,3 +146,49 @@ class LeggedRobotPosEnv(ManagerBasedRLEnv):
             self.reset_time_outs,
             self.extras,
         )
+
+    # ===================== 新增：Cost 计算辅助函数 =========================
+    def _compute_joint_pos_cost(self, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+        """
+        计算关节限位 Cost。
+        逻辑：Sum(ReLU(lower - q) + ReLU(q - upper))
+        """
+        asset: Articulation = self.scene[asset_cfg.name]
+
+        # 计算超出下限的部分 (lower - q) > 0
+        out_of_lower = (asset.data.soft_joint_pos_limits[:, asset_cfg.joint_ids, 0] - asset.data.joint_pos[
+            :, asset_cfg.joint_ids]).clip(min=0.0)
+
+        # 计算超出上限的部分 (q - upper) > 0
+        out_of_upper = (asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.soft_joint_pos_limits[
+            :, asset_cfg.joint_ids, 1]).clip(min=0.0)
+
+        # 对所有关节求和
+        return torch.sum(out_of_lower + out_of_upper, dim=1)
+
+    def _compute_obstacle_collision_cost(self, threshold: float = 1.0) -> torch.Tensor:
+        """
+        计算障碍物碰撞 Cost。
+        逻辑：只要非脚部刚体受力 > threshold，Cost = 1.0，否则 0.0。
+        """
+        contact_sensor: ContactSensor = self.scene.sensors["contact_forces"]
+
+        # 获取历史受力: (num_envs, history_len, num_bodies, 3)
+        net_contact_forces = contact_sensor.data.net_forces_w_history
+
+        # 1. 取力的模长 -> (num_envs, history, num_bodies)
+        forces_norm = torch.norm(net_contact_forces, dim=-1)
+
+        # 2. 筛选非脚部刚体 -> (num_envs, history, num_non_foot_bodies)
+        # 注意：这里用到了 __init__ 里缓存的 self.non_foot_body_indices
+        non_foot_forces = forces_norm[:, :, self.non_foot_body_indices]
+
+        # 3. 取历史最大值 & 刚体最大值 -> (num_envs,)
+        # 只要任何一个非脚部部位在任何历史时刻受力超标，就视为碰撞
+        max_force_val = torch.max(torch.max(non_foot_forces, dim=1)[0], dim=1)[0]
+
+        # 4. 判定是否碰撞 (大于阈值则为 1.0)
+        collision_detected = (max_force_val > threshold).float()
+
+        return collision_detected
+    # =====================================================================

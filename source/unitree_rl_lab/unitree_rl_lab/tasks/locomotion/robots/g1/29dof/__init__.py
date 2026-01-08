@@ -23,3 +23,16 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BasePPORunnerCfg",
     },
 )
+
+# 注册np3o版控制命令
+gym.register(
+    id="Unitree-G1-29dof-Position_np3o",
+    # entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    entry_point=f"{__name__}.obstacle_avoid_env:LeggedRobotPosNp3oEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.position_env_cfg:RobotNP3OEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.position_env_cfg:RobotNP3OPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_np3o_cfg:UnitreeNp3oRunnerCfg",
+    },
+)

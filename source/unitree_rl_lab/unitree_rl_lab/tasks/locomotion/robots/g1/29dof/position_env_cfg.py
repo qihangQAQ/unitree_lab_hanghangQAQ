@@ -3,14 +3,13 @@ import math
 import isaaclab.sim as sim_utils
 import isaaclab.terrains as terrain_gen
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.assets import RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
-from isaaclab.assets import RigidObjectCfg
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns,CameraCfg
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
@@ -19,8 +18,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
-from isaaclab.sensors import CameraCfg
-from isaaclab.sim import PinholeCameraCfg  # 引入针孔相机配置
+
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
@@ -117,36 +115,36 @@ class RobotSceneCfg(InteractiveSceneCfg):
         ),
         init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
     )
-    # ================= 修改后的深度相机配置 =================
-    depth_camera = CameraCfg(
-        # 1. 修改挂载点为 torso_link
-        prim_path="{ENV_REGEX_NS}/Robot/torso_link/depth_cam",
+    # # ================= 深度相机配置 =================
+    # depth_camera = CameraCfg(
+    #     # 1. 修改挂载点为 torso_link
+    #     prim_path="{ENV_REGEX_NS}/Robot/torso_link/depth_cam",
 
-        update_period=0.1,
-        height=80,
-        width=128,
-        data_types=["distance_to_image_plane"],
+    #     update_period=0.1,
+    #     height=80,
+    #     width=128,
+    #     data_types=["distance_to_image_plane"],
 
-        spawn=PinholeCameraCfg(
-            focal_length=24.0,
-            focus_distance=400.0,
-            horizontal_aperture=20.955,
-            clipping_range=(0.1, 5.0),
-        ),
+    #     spawn=PinholeCameraCfg(
+    #         focal_length=24.0,
+    #         focus_distance=400.0,
+    #         horizontal_aperture=20.955,
+    #         clipping_range=(0.1, 5.0),
+    #     ),
 
-        # 2. 调整偏移量 (模拟头部位置)
-        offset=CameraCfg.OffsetCfg(
-            # pos=(x, y, z)
-            # x=0.2: 向前伸 20cm (避免被胸部挡住)
-            # y=0.0: 居中
-            # z=0.5: 向上抬 50cm (假设 torso 原点在腰部，这个值需要您根据实测微调)
-            pos=(0.25, 0.0, 0.2),
+    #     # 2. 调整偏移量 (模拟头部位置)
+    #     offset=CameraCfg.OffsetCfg(
+    #         # pos=(x, y, z)
+    #         # x=0.2: 向前伸 20cm (避免被胸部挡住)
+    #         # y=0.0: 居中
+    #         # z=0.5: 向上抬 50cm (假设 torso 原点在腰部，这个值需要您根据实测微调)
+    #         pos=(0.25, 0.0, 0.2),
 
-            # 保持 ROS 坐标系
-            rot=(1.0, 0.0, 0.0, 0.0),
-            convention="world",
-        ),
-    )
+    #         # 保持 ROS 坐标系
+    #         rot=(1.0, 0.0, 0.0, 0.0),
+    #         convention="world",
+    #     ),
+    # )
 
 
 @configclass
@@ -682,3 +680,57 @@ class RobotPlayEnvCfg(RobotEnvCfg):
             "yaw": (-3.14, 3.14),  # 保留随机朝向
         }
 
+@configclass
+class NP3ORewardsCfg(RewardsCfg):
+    """
+    N-P3O 专用奖励配置。
+    继承自原 RewardsCfg，但移除了那些已经被转化为 N-P3O 约束 (Cost) 的项。
+    避免 '双重惩罚' (Double Counting)。
+    """
+    
+    # 1. 移除关节限位奖励 (已在 position_env.py 中作为 cost_limits 计算)
+    dof_pos_limits = None 
+
+    # 2. 移除障碍物碰撞奖励 (已在 position_env.py 中作为 cost_collision 计算)
+    obstacle_collision = None
+
+
+@configclass
+class RobotNP3OEnvCfg(RobotEnvCfg):
+    """
+    N-P3O 训练专用的环境配置。
+    """
+    # 覆盖 rewards 配置，使用上面定义的 NP3ORewardsCfg
+    rewards: NP3ORewardsCfg = NP3ORewardsCfg()
+
+    scene: RobotSceneCfg = RobotSceneCfg(num_envs=1024, env_spacing=2.5)
+
+
+@configclass
+class RobotNP3OPlayEnvCfg(RobotNP3OEnvCfg):
+    """
+    N-P3O 推理/播放模式配置。
+    继承自 RobotNP3OEnvCfg，同时应用 Play 模式的修改。
+    """
+    def __post_init__(self):
+        super().__post_init__()
+        # 复用 RobotPlayEnvCfg 中的逻辑 (减少环境数，简化地形等)
+        self.scene.num_envs = 1
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 10
+        self.scene.env_spacing = 0.0
+        
+        # 覆盖命令范围 (使用 Play 模式的范围)
+        self.commands.position.ranges = mdp.UniformPositionCommandCfg.Ranges(
+            pos_1=(3.0, 8.0),
+            pos_2=(-0.2, 0.2),
+            heading=(-0.3, 0.3),
+            use_polar=False
+        )
+        
+        # Play 模式下的重置逻辑
+        self.events.reset_base.params["pose_range"] = {
+            "x": (0.0, 0.0),
+            "y": (0.0, 0.0),
+            "yaw": (-3.14, 3.14),
+        }
