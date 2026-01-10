@@ -103,16 +103,19 @@ class LeggedRobotPosNp3oEnv(ManagerBasedRLEnv):
         # 这里简单起见，我们把它们加起来作为总 Cost 信号。
         # 如果你想分别看，可以存到 extras["log"] 里。
 
-        total_cost = joint_limit_cost + collision_cost
+        # total_cost = joint_limit_cost + collision_cost
+        costs = torch.stack([joint_limit_cost, collision_cost], dim=-1)
 
         # 存入 extras，Runner 的 process_env_step 会读取它
-        self.extras["cost"] = total_cost
+        self.extras["cost"] = costs
 
         # 可选：记录详细信息用于 WandB 展示
         self.extras["log"] = self.extras.get("log", {})
         self.extras["log"]["Cost/joint_limits"] = joint_limit_cost.mean()
         self.extras["log"]["Cost/collision"] = collision_cost.mean()
-        self.extras["log"]["Cost/total"] = total_cost.mean()
+        # self.extras["log"]["Cost/total"] = total_cost.mean()
+        self.extras["log"]["Cost/0_joint_limits_mean"] = costs[:, 0].mean()
+        self.extras["log"]["Cost/1_collision_mean"] = costs[:, 1].mean()
         # =========================================================================
 
         #  重置需要 reset 的 env

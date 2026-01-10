@@ -14,6 +14,8 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
+from isaaclab.sensors import CameraCfg
+from isaaclab.sim import PinholeCameraCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
@@ -104,7 +106,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)), # 初始先扔远点，等 reset 再拉回来
     )
 
-    # ================= 2. 一个圆柱体 (Cylinder) [你的第7个物体] =================
+    # ================= 2. 圆柱体 (Cylinder)  =================
     obstacle_cylinder_0 = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Cylinder_0",
         spawn=sim_utils.CylinderCfg(
@@ -115,36 +117,80 @@ class RobotSceneCfg(InteractiveSceneCfg):
         ),
         init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
     )
-    # # ================= 深度相机配置 =================
-    # depth_camera = CameraCfg(
-    #     # 1. 修改挂载点为 torso_link
-    #     prim_path="{ENV_REGEX_NS}/Robot/torso_link/depth_cam",
+    # ================= 3. 圆柱体 (Cylinder)  =================
+    obstacle_cylinder_1 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Cylinder_1",
+        spawn=sim_utils.CylinderCfg(
+            radius=0.35, height=0.6,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.8, 0.1)),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+    # 4. Cylinder (细高圆柱)
+    obstacle_cylinder_2 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Cylinder_2",
+        spawn=sim_utils.CylinderCfg(
+            radius=0.15, height=1.0,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.7, 0.8, 0.2)),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+    # 5. Sphere (球体)
+    obstacle_sphere_0 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Sphere_0",
+        spawn=sim_utils.SphereCfg(
+            radius=0.35,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.8, 0.2)),  # 绿
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+    # 6. Cone (圆锥体)
+    obstacle_cone_0 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Cone_0",
+        spawn=sim_utils.ConeCfg(
+            radius=0.35, height=0.8,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.2, 0.8)),  # 蓝
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+    # ================= 深度相机配置 =================
+    depth_camera = CameraCfg(
+        # 1. 修改挂载点为 torso_link
+        prim_path="{ENV_REGEX_NS}/Robot/torso_link/depth_cam",
 
-    #     update_period=0.1,
-    #     height=80,
-    #     width=128,
-    #     data_types=["distance_to_image_plane"],
+        update_period=0.1,
+        height=80,
+        width=128,
+        data_types=["distance_to_image_plane"],
 
-    #     spawn=PinholeCameraCfg(
-    #         focal_length=24.0,
-    #         focus_distance=400.0,
-    #         horizontal_aperture=20.955,
-    #         clipping_range=(0.1, 5.0),
-    #     ),
+        spawn=PinholeCameraCfg(
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 5.0),
+        ),
 
-    #     # 2. 调整偏移量 (模拟头部位置)
-    #     offset=CameraCfg.OffsetCfg(
-    #         # pos=(x, y, z)
-    #         # x=0.2: 向前伸 20cm (避免被胸部挡住)
-    #         # y=0.0: 居中
-    #         # z=0.5: 向上抬 50cm (假设 torso 原点在腰部，这个值需要您根据实测微调)
-    #         pos=(0.25, 0.0, 0.2),
+        # 2. 调整偏移量 (模拟头部位置)
+        offset=CameraCfg.OffsetCfg(
+            # pos=(x, y, z)
+            # x=0.2: 向前伸 20cm (避免被胸部挡住)
+            # y=0.0: 居中
+            # z=0.5: 向上抬 50cm (假设 torso 原点在腰部，这个值需要您根据实测微调)
+            pos=(0.25, 0.0, 0.2),
 
-    #         # 保持 ROS 坐标系
-    #         rot=(1.0, 0.0, 0.0, 0.0),
-    #         convention="world",
-    #     ),
-    # )
+            # 保持 ROS 坐标系
+            rot=(1.0, 0.0, 0.0, 0.0),
+            convention="world",
+        ),
+    )
 
 
 @configclass
@@ -480,7 +526,25 @@ class RewardsCfg:
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)                  # 关节加速度惩罚
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05)                # 动作变化率惩罚
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-10.0)            # 关节位置限制惩罚
-    energy = RewTerm(func=mdp.energy, weight=-2e-5)                             # 能量消耗惩罚
+
+    # def joint_pos_limits(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    #     """Penalize joint positions if they cross the soft limits.
+    #
+    #     This is computed as a sum of the absolute value of the difference between the joint position and the soft limits.
+    #     """
+    #     # extract the used quantities (to enable type-hinting)
+    #     asset: Articulation = env.scene[asset_cfg.name]
+    #     # compute out of limits constraints
+    #     out_of_limits = -(
+    #             asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.soft_joint_pos_limits[
+    #         :, asset_cfg.joint_ids, 0]
+    #     ).clip(max=0.0)
+    #     out_of_limits += (
+    #             asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.soft_joint_pos_limits[
+    #         :, asset_cfg.joint_ids, 1]
+    #     ).clip(min=0.0)
+    #     return torch.sum(out_of_limits, dim=1)
+    # energy = RewTerm(func=mdp.energy, weight=-2e-5)                             # 能量消耗惩罚
 
     # -- 关节偏差惩罚
     # 手臂关节偏差惩罚
@@ -582,6 +646,43 @@ class RewardsCfg:
         },
     )
 
+    # def obstacle_collision(
+    #         env: ManagerBasedRLEnv,
+    #         threshold: float = 1.0,
+    #         sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    #         command_name: str = "position",
+    # ) -> torch.Tensor:
+    #     """针对障碍物的碰撞惩罚，仿照 legged_robot_pos 逻辑实现。
+    #
+    #     该奖励检测机器人非脚部部位的接触力，并在靠近目标点时显著放大惩罚，
+    #     迫使机器人为了获得高额的任务奖励而必须学会避障。
+    #     """
+    #     # 1. 获取接触传感器数据
+    #     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    #
+    #     # 2. 检测指定部位（通常是大腿、躯干等）的碰撞力是否超过阈值
+    #     # shape: (num_envs, history, body_ids, 3) -> 取历史记录中的最大力
+    #     net_contact_forces = contact_sensor.data.net_forces_w_history
+    #     # 计算力向量的模，并在历史维度和身体部位维度上寻找是否存在超过 threshold 的力
+    #     collision_detected = torch.max(
+    #         torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1),
+    #         dim=1
+    #     )[0] > threshold
+    #
+    #     # 转换为 0/1 浮点数，并求和（统计当前有多少个设定的部位发生了碰撞）
+    #     reward = torch.sum(collision_detected, dim=1).float()
+    #
+    #     # 3. 增强逻辑：如果距离目标点很近（进入了 tight 区域）发生碰撞，惩罚翻倍
+    #     # 参考了你 rewards.py 中 _reward_termination 的逻辑
+    #     cmd_term = env.command_manager.get_term(command_name)
+    #     params = env.cfg.pos_reward_params
+    #
+    #     distance = torch.norm(cmd_term.position_targets[:, :2] - env.scene["robot"].data.root_pos_w[:, :2], dim=1)
+    #     near_goal = (distance < params.position_target_sigma_tight).float()
+    #
+    #     # 靠近目标时碰撞惩罚增加（例如 5 倍），防止机器人在最后一刻为了冲向目标而撞击障碍物
+    #     return reward * (1.0 + 4.0 * near_goal)
+
 
 @configclass
 # 终止条件配置
@@ -667,7 +768,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
 
         # 为播放模式设置特定的命令范围
         self.commands.position.ranges = mdp.UniformPositionCommandCfg.Ranges(
-            pos_1=(3.0, 8.0),      # 播放模式使用更小的范围
+            pos_1=(10.0, 15.0),      # 播放模式使用更小的范围
             pos_2=(-0.2, 0.2),     # 更小的横向偏移
             heading=(-0.3, 0.3),   # 更小的朝向变化
             use_polar=False
@@ -679,6 +780,8 @@ class RobotPlayEnvCfg(RobotEnvCfg):
             "y": (0.0, 0.0),
             "yaw": (-3.14, 3.14),  # 保留随机朝向
         }
+        self.episode_length_s = 25.0
+        self.commands.position.max_goal_time_s = 25.0
 
 @configclass
 class NP3ORewardsCfg(RewardsCfg):

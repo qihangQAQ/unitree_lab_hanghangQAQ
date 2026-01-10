@@ -17,6 +17,9 @@ class RslRlNp3oActorCriticCfg(RslRlPpoActorCriticCfg):
     """
     class_name: str = "ActorCriticNp3o"  # 对应稍后你要写的算法类名
 
+    # [N-P3O 修改] 显式定义约束数量，对应网络输出维度
+    num_costs: int = 2
+
     # [新增] Cost Critic 的网络隐藏层结构
     # 通常和 Value Critic 保持一致，或者稍微小一点
     cost_critic_hidden_dims: list[int] = [512, 256, 128]
@@ -34,9 +37,14 @@ class RslRlNp3oAlgorithmCfg(RslRlPpoAlgorithmCfg):
     """
     class_name: str = "NP3O"  # 对应稍后你要写的算法类名
 
+    # [N-P3O 修改] 显式定义约束数量，用于 Buffer 初始化
+    num_costs: int = 2
+
     # [新增] 惩罚系数 Kappa (κ)
     # 这是 N-P3O 中最重要的参数，控制违反约束时的惩罚力度
-    kappa: float = 1.0
+    kappa = [1, 1]
+
+    cost_limit = [0.0, 0.0]
 
     # [新增] Cost Critic 的 Loss 权重
     # 类似于 value_loss_coef，用于平衡 Task Value 和 Cost Value 的学习速度
@@ -97,7 +105,7 @@ class UnitreeNp3oRunnerCfg(RslRlOnPolicyRunnerCfg):
         entropy_coef=0.01,
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=1.0e-3,
+        learning_rate=1.0e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
@@ -105,7 +113,8 @@ class UnitreeNp3oRunnerCfg(RslRlOnPolicyRunnerCfg):
         max_grad_norm=1.0,
 
         # --- [N-P3O 新增参数配置] ---
-        kappa=1.0,  # 初始惩罚权重，论文说 N-P3O 对此不敏感，1.0 是个好起点
+        kappa=[1.0, 1.0],  # 初始惩罚权重，论文说 N-P3O 对此不敏感，1.0 是个好起点
+        cost_limit=[0.0, 0.0],  # 明确为每个约束设置阈值
         cost_value_loss_coef=0.5,  # Cost Critic 的学习权重
         normalize_cost_advantage=True,  # 开启归一化
         cost_clip_param=0.2,  # Cost 裁剪

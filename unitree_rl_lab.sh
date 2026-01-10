@@ -78,6 +78,14 @@ case "$1" in
         shift
         ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/train.py --headless "$@"
         ;;
+    -c|--camrec)
+        shift
+        ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/camrec.py "$@"
+        ;;
+    -r|--train_ray_predict)
+        shift
+        ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/train_ray_predict.py "$@"
+        ;;
     *) # unknown option
         ;;
 esac

@@ -229,49 +229,146 @@ class UniformPositionCommand(CommandTerm):
         self.heading_target[env_ids] = math_utils.wrap_to_pi(base_heading)
 
         # 4. 障碍物高级生成逻辑 (含 2m 安全区检测)
-        obs_names = ["obstacle_box_0", "obstacle_cylinder_0"]
+        obs_names = ["obstacle_box_0", "obstacle_cylinder_0","obstacle_cylinder_1"
+                     "obstacle_cylinder_2","obstacle_sphere_0","obstacle_cone_0"]
+
+        # 预估一个通用的障碍物半径 (用于计算偏移量)，取平均值约 0.35m
+        AVG_OBS_RADIUS = 0.35
 
         for name in obs_names:
             if name not in self._env.scene.keys(): continue
             obj = self._env.scene[name]
 
-            # --- 核心修改：基于概率和距离的生成控制 ---
-            # 采样插值比例 t (路径的 20% - 80%)
-            t = torch.rand(num, 1, device=self.device) * 0.6 + 0.2
+            # 生成概率随机数 [0, 1)
+            prob = torch.rand(num, device=self.device)
 
-            # 计算路径上的潜在位置
-            path_vec = target_pos_w[:, :2] - env_origins[:, :2]
-            potential_obs_pos = env_origins[:, :2] + path_vec * t
+            # --- 初始化位置容器 ---
+            final_pos_2d = torch.zeros(num, 2, device=self.device)
 
-            # 检测该点与机器人的距离
-            dist_to_robot = torch.norm(potential_obs_pos - env_origins[:, :2], dim=1)
+            # =========================================================
+            # Case 1: 20% 概率 - 障碍物完全不在路径上 (Off Path)
+            # =========================================================
+            mask_off = prob < 0.2
+            if mask_off.any():
+                # 全场随机撒点：x[-2, 22], y[-6, 6]
+                n_off = mask_off.sum()
+                final_pos_2d[mask_off, 0] = (torch.rand(n_off, device=self.device) * 24.0) - 2.0
+                final_pos_2d[mask_off, 1] = (torch.rand(n_off, device=self.device) * 12.0) - 6.0
 
-            # 判定掩码：距离机器人 > 2m 且 距离终点 > 0.5m 才视为有效位置
-            # 如果不满足，则将该环境下的障碍物“扔掉”
-            is_safe = (dist_to_robot > 2.0) & (torch.norm(potential_obs_pos - target_pos_w[:, :2], dim=1) > 0.5)
+            # =========================================================
+            # 计算路径基础信息 (供 Case 2 和 Case 3 使用)
+            # =========================================================
+            mask_on_path = ~mask_off  # 剩下的 80% 都是和路径有关的
+            if mask_on_path.any():
+                # 采样路径上的进度 t (0.2 ~ 0.8)，避免太靠近起点或终点
+                n_on = mask_on_path.sum()
+                t = torch.rand(n_on, 1, device=self.device) * 0.6 + 0.2
 
-            # 准备物理状态
+                # 路径向量
+                start_p = env_origins[mask_on_path, :2]
+                end_p = target_pos_w[mask_on_path, :2]
+                path_vec = end_p - start_p
+
+                # 路径上的基础点
+                base_pos = start_p + path_vec * t
+
+                # 计算路径的单位法向量 (用于施加横向偏移)
+                # path_vec: (dx, dy) -> normal: (-dy, dx)
+                path_len = torch.norm(path_vec, dim=1, keepdim=True) + 1e-6
+                normal_vec = torch.cat([-path_vec[:, 1:2], path_vec[:, 0:1]], dim=1) / path_len
+
+                # =========================================================
+                # Case 2: 20% 概率 (0.2 <= p < 0.4) - 全部出现在路径上 (Full Block)
+                # =========================================================
+                # 逻辑：横向偏移很小，障碍物中心几乎就在连线上
+                mask_full = (prob >= 0.2) & (prob < 0.4)
+                # 注意：mask_full 是全局的，需要映射到 mask_on_path 的子集
+                # 这里为了代码简洁，我们直接操作 final_pos_2d，利用 mask_full 索引
+
+                if mask_full.any():
+                    # 重新获取对应的 base_pos 和 normal (需要切片对应)
+                    # 这种切片稍微麻烦，为了方便，我们可以直接对所有 mask_on_path 计算偏移，然后按 mask 赋值
+                    pass
+
+                    # =========================================================
+                # Case 3: 60% 概率 (0.4 <= p < 1.0) - 一部分出现在路径上 (Partial Block)
+                # =========================================================
+                # 逻辑：横向偏移 ≈ 障碍物半径。这样障碍物中心偏离路径，但边缘挡住路径。
+                # 随机向左偏或向右偏
+
+                # --- 统一计算偏移量 ---
+                # 1. 基础偏移：如果是 Full Block，偏移为 0；如果是 Partial，偏移为 Radius
+                #    这里我们用 torch.where
+
+                # 在 mask_on_path 的范围内区分 Full 和 Partial
+                # 提取 mask_on_path 对应的 prob
+                probs_on = prob[mask_on_path]
+                is_full = probs_on < 0.4  # 在 on_path (p>=0.2) 的前提下，p<0.4 是 Full
+
+                offset_mag = torch.where(
+                    is_full,
+                    torch.zeros_like(probs_on),  # Full: 偏移 0
+                    torch.tensor(AVG_OBS_RADIUS + 0.1, device=self.device)  # Partial: 偏移 半径+一点余量
+                )
+
+                # 2. 加上随机扰动 (Jitter)
+                # Full: 允许 +/- 0.1m 的微小误差
+                # Partial: 允许 +/- 0.1m 的浮动，让“遮挡多少”有变化
+                jitter = (torch.rand_like(probs_on) - 0.5) * 0.2
+                offset_mag += jitter
+
+                # 3. 随机左右方向 (Sign)
+                sign = torch.sign(torch.rand_like(probs_on) - 0.5)
+
+                # 4. 计算最终偏移向量
+                offset_vec = normal_vec * (offset_mag * sign).unsqueeze(1)
+
+                # 5. 赋值
+                final_pos_2d[mask_on_path] = base_pos + offset_vec
+
+            # =========================================================
+            # 安全性检查 (Safety Check)
+            # =========================================================
+            # 如果生成的点离机器人太近 (<2m)，强制扔到远处的随机位置
+            dist_to_robot = torch.norm(final_pos_2d - env_origins[:, :2], dim=1)
+            is_unsafe = dist_to_robot < 2.0
+
+            if is_unsafe.any():
+                n_unsafe = is_unsafe.sum()
+                # 重新随机撒点
+                safe_random_x = (torch.rand(n_unsafe, device=self.device) * 24.0) - 2.0
+                safe_random_y = (torch.rand(n_unsafe, device=self.device) * 12.0) - 6.0
+                final_pos_2d[is_unsafe, 0] = safe_random_x
+                final_pos_2d[is_unsafe, 1] = safe_random_y
+
+            # =========================================================
+            # 写入物理状态
+            # =========================================================
             root_state = obj.data.default_root_state[env_ids].clone()
 
-            # 最终位置分配
-            final_pos = torch.zeros(num, 3, device=self.device)
+            # 写入 XY
+            root_state[:, 0] = final_pos_2d[:, 0]
+            root_state[:, 1] = final_pos_2d[:, 1]
 
-            # 如果安全，放在路径上；如果不安全，扔到地下 -100m 处
-            # 这样 2D 射线传感器（即便向下看）也绝对扫不到它
-            final_pos[:, :2] = torch.where(is_safe.unsqueeze(1), potential_obs_pos,
-                                           torch.tensor([1000.0, 1000.0], device=self.device))
-            final_pos[:, 2] = torch.where(is_safe, torch.tensor(0.6, device=self.device),
-                                          torch.tensor(-100.0, device=self.device))
+            # 写入 Z (高度)
+            # 根据物体形状调整中心高度
+            if "Box" in name:
+                z_h = 0.25  # 假设Box高0.5
+            elif "Cylinder" in name:
+                z_h = 0.4  # 假设Cylinder高0.8左右
+            elif "Sphere" in name:
+                z_h = 0.35  # 半径0.35
+            elif "Cone" in name:
+                z_h = 0.4  # 高0.8
+            else:
+                z_h = 0.5
 
-            # 只有在安全的情况下才加横向抖动，否则扔远了没意义
-            y_noise = (torch.rand(num, device=self.device) - 0.5) * 1.6
-            final_pos[is_safe, 1] += y_noise[is_safe]
+            # 如果被扔到地下(例如初始化未ready时)，这里保持在地面上
+            root_state[:, 2] = env_origins[:, 2] + z_h
 
-            root_state[:, :3] = final_pos
-
-            # 强制写入物理引擎
             obj.write_root_state_to_sim(root_state, env_ids=env_ids)
 
+        # 记得更新 _update_command 里的 obs_names 列表，和上面保持一致！
         self._debug_vis_callback()
         self._debug_vis_heading_callback()
 
@@ -303,7 +400,8 @@ class UniformPositionCommand(CommandTerm):
         self.ray_obs[:] = self.ray_max_dist
 
         # 2. 遍历场景中的障碍物 (Box 和 Cylinder)
-        obs_names = ["obstacle_box_0", "obstacle_cylinder_0"]
+        obs_names = ["obstacle_box_0", "obstacle_cylinder_0","obstacle_cylinder_1",
+                     "obstacle_cylinder_2","obstacle_sphere_0","obstacle_cone_0"]
         for name in obs_names:
             if name not in self._env.scene.keys(): continue
             obj = self._env.scene[name]
