@@ -21,8 +21,8 @@ def main():
     # （可选）如果你的 label.pkl 不在 npy 同目录，在这里手动指定；否则保持 None 自动使用同目录下的 label.pkl
     pkl_path = None  # 例如："/home/qihang/.../rec_cam_xxx/label.pkl"
 
-    # ===================== 2) 在这里填写你要加载的网络模型路径（请修改） =====================
-    model_path = "/home/qihang/code_lab/unitree_rl_lab-main/logs/rsl_rl/ray_prediction/20260110-211721_resnet18_N20007/epoch50.pt"
+    # ===================== 2) 加载的网络模型路径 =====================
+    model_path = "/home/qihang/code_lab/unitree_rl_lab-main/logs/rsl_rl/ray_prediction_final/20260111-115935_resnet18_N20007/epoch200.pt"
     # =====================================================================================
 
     # 输出图片保存目录（可改）
