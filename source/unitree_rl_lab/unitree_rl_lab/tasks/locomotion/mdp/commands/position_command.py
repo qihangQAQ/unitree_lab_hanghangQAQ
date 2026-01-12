@@ -19,10 +19,15 @@ from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, G
 # from isaaclab.envs import ManagerBasedEnv
 import isaaclab.sim as sim_utils
 # from .commands_cfg import UniformPositionCommandCfg
+import os
 
 
-
-
+# ================= 配置区 =================
+# 指向你训练好的模型路径
+MODEL_PATH = "/home/qihang/code_lab/unitree_rl_lab-main/logs/rsl_rl/ray_prediction/20260110-211721_resnet18_N20007/epoch50.pt"
+# 训练时设定的最大距离（用于归一化输入）
+MAX_DEPTH_RANGE = 6.0
+# =========================================
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -106,6 +111,9 @@ class UniformPositionCommand(CommandTerm):
                 },
             )
         )
+        # =======================修改：统一使用模型参数=====================
+        self.ray_max_dist = MAX_DEPTH_RANGE  # 修改为配置的常量
+        # ================================================================
 
         # --- 2D 射线参数设置 ---
         self.ray_max_dist = 6.0
@@ -125,11 +133,25 @@ class UniformPositionCommand(CommandTerm):
                 markers={
                     "dot": sim_utils.SphereCfg(
                         radius=0.03,
-                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0))  # 青色
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0))  # 青色
                     )
                 }
             )
         )
+
+        # =======================新增：加载神经网络模型=====================
+        print(f"[RayPredictor] Loading ray prediction model from: {MODEL_PATH}")
+        if not os.path.exists(MODEL_PATH):
+            raise FileNotFoundError(f"Model path does not exist: {MODEL_PATH}")
+
+        try:
+            # 加载 TorchScript 模型并设为评估模式
+            self.ray_model = torch.jit.load(MODEL_PATH, map_location=self.device)
+            self.ray_model.eval()
+            print("[RayPredictor] Model loaded successfully!")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load model: {e}")
+        # ================================================================
     
     # def _resample_command(self, env_ids: Sequence[int]):
     #     num = len(env_ids)
@@ -395,29 +417,70 @@ class UniformPositionCommand(CommandTerm):
         standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
         self.pos_command_b[standing_env_ids, :] = 0.0
 
-        # --- 手搓射线逻辑 ---
-        # 1. 初始化距离
-        self.ray_obs[:] = self.ray_max_dist
+        # # --- 手搓射线逻辑 ---
+        # # 1. 初始化距离
+        # self.ray_obs[:] = self.ray_max_dist
+        #
+        # # 2. 遍历场景中的障碍物 (Box 和 Cylinder)
+        # obs_names = ["obstacle_box_0", "obstacle_cylinder_0","obstacle_cylinder_1",
+        #              "obstacle_cylinder_2","obstacle_sphere_0","obstacle_cone_0"]
+        # for name in obs_names:
+        #     if name not in self._env.scene.keys(): continue
+        #     obj = self._env.scene[name]
+        #
+        #     # 获取物体相对于机器人的位置 (Local Frame)
+        #     obj_pos_w = obj.data.root_pos_w[:, :3]
+        #     obj_rel_pos_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w,
+        #                                                   obj_pos_w - self.robot.data.root_pos_w[:, :3])
+        #
+        #     # 调用数学查询 (简化处理：Box 也当做半径 0.4 的圆柱处理，或根据需求微调半径)
+        #     radius = 0.4 if "box" in name else 0.25
+        #     dist = self.circle_ray_query(self.ray_x0, self.ray_y0, self.ray_thetas, obj_rel_pos_b[:, :2], radius,
+        #                                  self.ray_max_dist)
+        #
+        #     # 取最近距离
+        #     self.ray_obs = torch.minimum(self.ray_obs, dist)
 
-        # 2. 遍历场景中的障碍物 (Box 和 Cylinder)
-        obs_names = ["obstacle_box_0", "obstacle_cylinder_0","obstacle_cylinder_1",
-                     "obstacle_cylinder_2","obstacle_sphere_0","obstacle_cone_0"]
-        for name in obs_names:
-            if name not in self._env.scene.keys(): continue
-            obj = self._env.scene[name]
+        # =======================新增：使用模型预测代替手搓射线=====================
+        # 1. 获取深度相机数据 (假设cfg中名字叫 depth_camera)
+        # 如果当前仿真步还没有数据，直接返回，保持 ray_obs 为初始值
+        if "depth_camera" not in self._env.scene.sensors:
+            # 如果你改了cfg里的名字，这里会报错，请确保 position_env_cfg.py 里有 depth_camera
+            return
 
-            # 获取物体相对于机器人的位置 (Local Frame)
-            obj_pos_w = obj.data.root_pos_w[:, :3]
-            obj_rel_pos_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w,
-                                                          obj_pos_w - self.robot.data.root_pos_w[:, :3])
+        depth_sensor = self._env.scene.sensors["depth_camera"]
+        # 数据通常是 (num_envs, Height, Width) 或 (num_envs, H, W, 1)
+        if "distance_to_image_plane" not in depth_sensor.data.output:
+            return
 
-            # 调用数学查询 (简化处理：Box 也当做半径 0.4 的圆柱处理，或根据需求微调半径)
-            radius = 0.4 if "box" in name else 0.25
-            dist = self.circle_ray_query(self.ray_x0, self.ray_y0, self.ray_thetas, obj_rel_pos_b[:, :2], radius,
-                                         self.ray_max_dist)
+        raw_depth = depth_sensor.data.output["distance_to_image_plane"]
 
-            # 取最近距离
-            self.ray_obs = torch.minimum(self.ray_obs, dist)
+        # 2. 数据预处理 (必须严格匹配 train_ray_final.py 中的逻辑)
+        # 步骤A: 处理 Inf (将天空/无限远 设为 MAX)
+        # 训练脚本中 CamrecFolderDataset 使用 np.nan_to_num(..., posinf=MAX)
+        depth_proc = torch.nan_to_num(raw_depth, posinf=MAX_DEPTH_RANGE, neginf=0.0, nan=0.0)
+
+        # 步骤B: 归一化到 [0, 1] (depth = clip(d, 0, MAX) / MAX)
+        depth_proc = torch.clamp(depth_proc, 0.0, MAX_DEPTH_RANGE) / MAX_DEPTH_RANGE
+
+        # 步骤C: 维度调整，模型输入需要 (N, 1, H, W)
+        if depth_proc.ndim == 3:  # (N, H, W)
+            depth_proc = depth_proc.unsqueeze(1)
+        elif depth_proc.ndim == 4:  # (N, H, W, 1) -> (N, 1, H, W)
+            depth_proc = depth_proc.permute(0, 3, 1, 2)
+
+        # 3. 模型推理
+        with torch.no_grad():
+            # 模型输出是原始米数 (训练脚本中 label y 没有除以 6.0，所以输出不需要反归一化)
+            pred_rays = self.ray_model(depth_proc)
+
+        # 4. 更新观测 buffer
+        # 截断一下结果，保证在合理范围内
+        self.ray_obs[:] = torch.clamp(pred_rays, 0.0, MAX_DEPTH_RANGE)
+
+        # 5. 调用原来的可视化，这样你就能看到模型预测出的“点”在哪里了
+        self._debug_vis_rays_callback()
+
 
         # 调用可视化
         self._debug_vis_rays_callback()
