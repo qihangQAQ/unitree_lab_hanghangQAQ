@@ -162,6 +162,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = multi_agent_to_single_agent(env)
 
     # save resume path before creating a new log_dir
+    # 如果是“恢复训练”（Resume）或者是“蒸馏”（Distillation）模式，加载之前保存的模型权重。
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
@@ -203,10 +204,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         runner.load(resume_path)
 
     # dump the configuration into log-directory
+    # 本次实验的env参数配置 -- env.yaml文件
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
+    
+    # 本次实验的ppo算法超参数配置 -- agent.yaml文件
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+    
+    # 生成一个专门用于 部署（Deployment）的配置文件
     export_deploy_cfg(env.unwrapped, log_dir)
+    
     # copy the environment configuration file to the log directory
+    # 直接把定义环境配置的那个 Python 文件（.py）复制一份到日志目录里。
     shutil.copy(
         inspect.getfile(env_cfg.__class__),
         os.path.join(log_dir, "params", os.path.basename(inspect.getfile(env_cfg.__class__))),

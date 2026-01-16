@@ -126,14 +126,28 @@ class UniformPositionCommand(CommandTerm):
         self.ray_x0 = 0.1  # 基座前方 10cm
         self.ray_y0 = 0.0
 
-        # 射线可视化 Marker (每条线上 8 个小球)
-        self.ray_visualizer = VisualizationMarkers(
+        # 1. 网络预测模式：绿球 (Green)
+        self.ray_visualizer_net = VisualizationMarkers(
             VisualizationMarkersCfg(
-                prim_path="/Visuals/Command/ray_dots",
+                prim_path="/Visuals/Command/ray_dots_net",
                 markers={
                     "dot": sim_utils.SphereCfg(
                         radius=0.03,
-                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0))  # 青色
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0))  # 绿色
+                    )
+                }
+            )
+        )
+
+        # 2. 手搓模式：蓝球 (Blue)
+        # (注：如果你想要橙色颜色，请把 color 改为 (1.0, 0.5, 0.0))
+        self.ray_visualizer_hand = VisualizationMarkers(
+            VisualizationMarkersCfg(
+                prim_path="/Visuals/Command/ray_dots_hand",
+                markers={
+                    "dot": sim_utils.SphereCfg(
+                        radius=0.03,
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0))  # 蓝色
                     )
                 }
             )
@@ -394,10 +408,10 @@ class UniformPositionCommand(CommandTerm):
         self._debug_vis_callback()
         self._debug_vis_heading_callback()
 
-
-
     def _update_command(self):
-        """每个 step 调用：根据当前状态实时计算 [x_err, y_err, heading_err]."""
+        """每个 step 调用：根据当前状态实时计算 [x_err, y_err, heading_err] 以及 射线观测。"""
+
+        # ======================= 1. 更新位置和朝向命令 (保持不变) =======================
         env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
 
         root_pos_w = self.robot.data.root_pos_w[env_ids, :3]
@@ -405,7 +419,6 @@ class UniformPositionCommand(CommandTerm):
         current_heading = self.robot.data.heading_w[env_ids]
 
         pos_diff_w = self.position_targets[env_ids] - root_pos_w
-        # pos_diff_b = math_utils.quat_rotate_inverse(root_quat_w, pos_diff_w)
         pos_diff_b = math_utils.quat_apply_inverse(root_quat_w, pos_diff_w)
 
         self.pos_command_b[env_ids, 0:2] = pos_diff_b[:, 0:2]
@@ -413,76 +426,100 @@ class UniformPositionCommand(CommandTerm):
         heading_err = math_utils.wrap_to_pi(self.heading_target[env_ids] - current_heading)
         self.pos_command_b[env_ids, 2] = heading_err
 
-        # 如果有 standing_env，可以在这里置 0
+        # 如果有 standing_env，置 0
         standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
         self.pos_command_b[standing_env_ids, :] = 0.0
 
-        # # --- 手搓射线逻辑 ---
-        # # 1. 初始化距离
-        # self.ray_obs[:] = self.ray_max_dist
-        #
-        # # 2. 遍历场景中的障碍物 (Box 和 Cylinder)
-        # obs_names = ["obstacle_box_0", "obstacle_cylinder_0","obstacle_cylinder_1",
-        #              "obstacle_cylinder_2","obstacle_sphere_0","obstacle_cone_0"]
-        # for name in obs_names:
-        #     if name not in self._env.scene.keys(): continue
-        #     obj = self._env.scene[name]
-        #
-        #     # 获取物体相对于机器人的位置 (Local Frame)
-        #     obj_pos_w = obj.data.root_pos_w[:, :3]
-        #     obj_rel_pos_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w,
-        #                                                   obj_pos_w - self.robot.data.root_pos_w[:, :3])
-        #
-        #     # 调用数学查询 (简化处理：Box 也当做半径 0.4 的圆柱处理，或根据需求微调半径)
-        #     radius = 0.4 if "box" in name else 0.25
-        #     dist = self.circle_ray_query(self.ray_x0, self.ray_y0, self.ray_thetas, obj_rel_pos_b[:, :2], radius,
-        #                                  self.ray_max_dist)
-        #
-        #     # 取最近距离
-        #     self.ray_obs = torch.minimum(self.ray_obs, dist)
+        # ======================= 2. 射线感知逻辑融合 (核心修改) =======================
 
-        # =======================新增：使用模型预测代替手搓射线=====================
-        # 1. 获取深度相机数据 (假设cfg中名字叫 depth_camera)
-        # 如果当前仿真步还没有数据，直接返回，保持 ray_obs 为初始值
-        if "depth_camera" not in self._env.scene.sensors:
-            # 如果你改了cfg里的名字，这里会报错，请确保 position_env_cfg.py 里有 depth_camera
-            return
+        # 判断是否存在深度相机传感器
+        use_neural_network = "depth_camera" in self._env.scene.sensors
 
-        depth_sensor = self._env.scene.sensors["depth_camera"]
-        # 数据通常是 (num_envs, Height, Width) 或 (num_envs, H, W, 1)
-        if "distance_to_image_plane" not in depth_sensor.data.output:
-            return
+        self._use_nn_vis = use_neural_network
 
-        raw_depth = depth_sensor.data.output["distance_to_image_plane"]
+        if use_neural_network:
+            # ------------------------------------------------------------------
+            # 分支 A: 使用神经网络预测 (模拟实机 / 开启相机时)
+            # ------------------------------------------------------------------
+            depth_sensor = self._env.scene.sensors["depth_camera"]
 
-        # 2. 数据预处理 (必须严格匹配 train_ray_final.py 中的逻辑)
-        # 步骤A: 处理 Inf (将天空/无限远 设为 MAX)
-        # 训练脚本中 CamrecFolderDataset 使用 np.nan_to_num(..., posinf=MAX)
-        depth_proc = torch.nan_to_num(raw_depth, posinf=MAX_DEPTH_RANGE, neginf=0.0, nan=0.0)
+            # 只有当传感器有数据输出时才处理 (第一帧可能为空)
+            if "distance_to_image_plane" in depth_sensor.data.output:
+                raw_depth = depth_sensor.data.output["distance_to_image_plane"]
 
-        # 步骤B: 归一化到 [0, 1] (depth = clip(d, 0, MAX) / MAX)
-        depth_proc = torch.clamp(depth_proc, 0.0, MAX_DEPTH_RANGE) / MAX_DEPTH_RANGE
+                # A-1. 数据预处理 (NaN/Inf 处理)
+                depth_proc = torch.nan_to_num(raw_depth, posinf=self.ray_max_dist, neginf=0.0, nan=0.0)
 
-        # 步骤C: 维度调整，模型输入需要 (N, 1, H, W)
-        if depth_proc.ndim == 3:  # (N, H, W)
-            depth_proc = depth_proc.unsqueeze(1)
-        elif depth_proc.ndim == 4:  # (N, H, W, 1) -> (N, 1, H, W)
-            depth_proc = depth_proc.permute(0, 3, 1, 2)
+                # A-2. 归一化 [0, 1]
+                depth_proc = torch.clamp(depth_proc, 0.0, self.ray_max_dist) / self.ray_max_dist
 
-        # 3. 模型推理
-        with torch.no_grad():
-            # 模型输出是原始米数 (训练脚本中 label y 没有除以 6.0，所以输出不需要反归一化)
-            pred_rays = self.ray_model(depth_proc)
+                # A-3. 维度调整 (N, H, W) -> (N, 1, H, W)
+                if depth_proc.ndim == 3:
+                    depth_proc = depth_proc.unsqueeze(1)
+                elif depth_proc.ndim == 4:
+                    depth_proc = depth_proc.permute(0, 3, 1, 2)
 
-        # 4. 更新观测 buffer
-        # 截断一下结果，保证在合理范围内
-        self.ray_obs[:] = torch.clamp(pred_rays, 0.0, MAX_DEPTH_RANGE)
+                # A-4. 模型推理
+                with torch.no_grad():
+                    # 模型输出即为预测的距离 (米)
+                    pred_rays = self.ray_model(depth_proc)
 
-        # 5. 调用原来的可视化，这样你就能看到模型预测出的“点”在哪里了
-        self._debug_vis_rays_callback()
+                # A-5. 更新观测值
+                self.ray_obs[:] = torch.clamp(pred_rays, 0.0, self.ray_max_dist)
+            else:
+                # 如果相机还没准备好，暂时设为最大距离
+                self.ray_obs[:] = self.ray_max_dist
 
+        else:
+            # ------------------------------------------------------------------
+            # 分支 B: 使用上帝视角几何计算 (训练无相机策略 / Debug 时)
+            # ------------------------------------------------------------------
 
-        # 调用可视化
+            # B-1. 初始化为最大距离
+            self.ray_obs[:] = self.ray_max_dist
+
+            # B-2. 定义要检测的障碍物列表 (需与 env_cfg 里的名字一致)
+            obs_names = [
+                "obstacle_box_0",
+                "obstacle_cylinder_0", "obstacle_cylinder_1", "obstacle_cylinder_2",
+                "obstacle_sphere_0", "obstacle_cone_0"
+            ]
+
+            # B-3. 遍历障碍物计算交点
+            for name in obs_names:
+                if name not in self._env.scene.keys(): continue
+                obj = self._env.scene[name]
+
+                # 获取物体相对于机器人的位置 (Robot Base Frame)
+                # obj_pos_w: (N, 3) -> obj_rel_pos_b: (N, 3)
+                obj_pos_w = obj.data.root_pos_w[:, :3]
+                obj_rel_pos_b = math_utils.quat_apply_inverse(
+                    self.robot.data.root_quat_w,
+                    obj_pos_w - self.robot.data.root_pos_w[:, :3]
+                )
+
+                # 根据名字简略设定碰撞半径 (近似处理)
+                if "Box" in name:
+                    radius = 0.45  # Box 比较大，给大一点的包围圆
+                elif "Sphere" in name or "Cone" in name or "Cylinder_1" in name:
+                    radius = 0.35
+                else:
+                    radius = 0.25
+
+                # 调用几何计算函数
+                dist = self.circle_ray_query(
+                    self.ray_x0, self.ray_y0,
+                    self.ray_thetas,
+                    obj_rel_pos_b[:, :2],
+                    radius,
+                    self.ray_max_dist
+                )
+
+                # 取最小值 (即最近的障碍物距离)
+                self.ray_obs = torch.minimum(self.ray_obs, dist)
+
+        # ======================= 3. 可视化 =======================
+        # 无论用哪种方式计算，都调用可视化看看点在哪里
         self._debug_vis_rays_callback()
 
 
@@ -637,36 +674,35 @@ class UniformPositionCommand(CommandTerm):
         """在每条射线上沿距离画 8 个点"""
         if not self.robot.is_initialized: return
 
-        # 每条射线画 8 个点，一共 num_envs * 11 * 8 个 Marker
+        # 每条射线画 8 个点
         num_dots_per_ray = 8
-        total_dots = self.num_envs * self.ray_num * num_dots_per_ray
 
+        # ... (中间计算 dots_w 的数学逻辑完全不用变) ...
+        # ... 省略计算过程，保留你原来的计算代码 ...
+
+        # 假设你已经计算好了 dots_w (位置在下面)
         # 计算所有点在机器人坐标系下的位置
-        # 生成线性的比例 [0.1, 0.2, ..., 1.0]
         dot_scales = torch.linspace(0.1, 1.0, num_dots_per_ray, device=self.device)
-
-        # 计算点在 Body 系下的 XY
-        # (num_envs, ray_num, 8)
-        current_ray_dist = self.ray_obs.unsqueeze(-1) * dot_scales  # 距离按比例分布
-
-        # 计算 X, Y (Body Frame)
+        current_ray_dist = self.ray_obs.unsqueeze(-1) * dot_scales
         dot_x_b = self.ray_x0 + current_ray_dist * torch.cos(self.ray_thetas).unsqueeze(-1)
         dot_y_b = self.ray_y0 + current_ray_dist * torch.sin(self.ray_thetas).unsqueeze(-1)
-        dot_z_b = torch.zeros_like(dot_x_b) + 0.1  # 离地 10cm
-
-        dots_b = torch.stack([dot_x_b, dot_y_b, dot_z_b], dim=-1)  # (N, 11, 8, 3)
-
-        # 转换到世界坐标系
-        # 铺平为 (Total, 3) 方便计算
+        dot_z_b = torch.zeros_like(dot_x_b) + 0.1
+        dots_b = torch.stack([dot_x_b, dot_y_b, dot_z_b], dim=-1)
         dots_b_flat = dots_b.view(-1, 3)
-        # 重复 root 状态以匹配点数
         root_pos_w = self.robot.data.root_pos_w.repeat_interleave(self.ray_num * num_dots_per_ray, dim=0)
         root_quat_w = self.robot.data.root_quat_w.repeat_interleave(self.ray_num * num_dots_per_ray, dim=0)
-
         dots_w = math_utils.quat_apply(root_quat_w, dots_b_flat) + root_pos_w[:, :3]
 
-        # 可视化
-        self.ray_visualizer.visualize(dots_w)
+        # ================= 修改开始：根据状态切换颜色 =================
+        if self._use_nn_vis:
+            # 开启相机 -> 显示绿球，隐藏蓝球
+            self.ray_visualizer_net.visualize(dots_w)
+            self.ray_visualizer_hand.set_visibility(False)
+        else:
+            # 没开相机 -> 显示蓝球，隐藏绿球
+            self.ray_visualizer_hand.visualize(dots_w)
+            self.ray_visualizer_net.set_visibility(False)
+        # ================= 修改结束 =================
 
 
 @configclass
