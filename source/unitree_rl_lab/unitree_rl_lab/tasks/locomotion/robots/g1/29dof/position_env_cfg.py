@@ -806,7 +806,7 @@ class RobotNP3OEnvCfg(RobotEnvCfg):
     # 覆盖 rewards 配置，使用上面定义的 NP3ORewardsCfg
     rewards: NP3ORewardsCfg = NP3ORewardsCfg()
 
-    scene: RobotSceneCfg = RobotSceneCfg(num_envs=4096, env_spacing=2.5)
+    scene: RobotSceneCfg = RobotSceneCfg(num_envs=1024, env_spacing=2.5)
 
 
 @configclass
