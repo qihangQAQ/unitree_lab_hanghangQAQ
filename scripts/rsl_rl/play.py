@@ -62,6 +62,7 @@ from isaaclab_tasks.utils import get_checkpoint_path
 
 import unitree_rl_lab.tasks  # noqa: F401
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
+from rsl_rl.runners import NP3ORunner
 
 
 def main():
@@ -118,12 +119,18 @@ def main():
     # load previously trained model
     if not hasattr(agent_cfg, "class_name") or agent_cfg.class_name == "OnPolicyRunner":
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        # ▼▼▼▼▼▼▼▼ 新增这段 elif ▼▼▼▼▼▼▼▼
+    elif agent_cfg.class_name == "NP3ORunner":
+        runner = NP3ORunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        # ▲▲▲▲▲▲▲▲ 新增结束 ▲▲▲▲▲▲▲▲
     elif agent_cfg.class_name == "DistillationRunner":
         from rsl_rl.runners import DistillationRunner
 
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+
+
     runner.load(resume_path)
 
     # obtain the trained policy for inference
