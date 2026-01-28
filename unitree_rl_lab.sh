@@ -86,6 +86,10 @@ case "$1" in
         shift
         ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/train_ray_predict.py "$@"
         ;;
+    -v|viz_npy_traj_in_isaacsim)
+        shift
+        ${python_exe} ${UNITREE_RL_LAB_PATH}/scripts/rsl_rl/viz_npy_traj_in_isaacsim.py "$@"
+        ;;
     *) # unknown option
         ;;
 esac
