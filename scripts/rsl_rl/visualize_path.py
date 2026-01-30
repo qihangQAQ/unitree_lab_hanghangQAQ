@@ -2,20 +2,24 @@ import argparse
 import numpy as np
 import torch
 import sys
+import time
 
 from isaaclab.app import AppLauncher
 
+# ==========================================
 # 1. 配置参数
-parser = argparse.ArgumentParser(description="Standalone Visualization V2 (Fix Colors)")
+# ==========================================
+parser = argparse.ArgumentParser(description="Complete Sequential Visualization (Sorted & Colored)")
 parser.add_argument("--file", type=str, required=True, help="Path to .npy file")
 parser.add_argument("--index", type=int, default=0, help="Batch index")
 parser.add_argument("--z_offset", type=float, default=0.0, help="Height offset (meters)")
 parser.add_argument("--scale", type=float, default=1.0, help="Scale factor")
+parser.add_argument("--speed", type=float, default=0.02, help="Time interval between points (seconds)")
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
-# 2. 启动 Isaac Sim
+# 启动 Isaac Sim
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -25,63 +29,95 @@ from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 
 
 # =========================================================================
-# 核心函数 1: 从 Mask 概率计算整齐的 ID (Ported from postprocessing.py)
+# 核心算法模块
 # =========================================================================
-def compute_ids_from_masks(pred_masks, conf_scores=None):
-    """
-    逻辑来源: utils/postprocessing.py -> process_pred_stroke_masks_to_stroke_ids
-    功能: 将模型的概率输出 (Logits) 转换为确定的整数 ID
-    """
-    # pred_masks shape: [N_Strokes, N_Points] (单样本)
 
-    # 1. Sigmoid 激活: 把 Logits 变成 0~1 的概率
-    # 公式: 1 / (1 + exp(-x))
+def compute_ids_from_masks(pred_masks):
+    """
+    [算法1] 修复颜色杂乱
+    从概率 (Logits) 中计算确定的 ID (Argmax)
+    """
+    # Sigmoid 激活
     prob_masks = 1 / (1 + np.exp(-pred_masks))
-
-    # 2. 简单的过滤 (可选): 如果某笔画整体置信度太低，可以忽略
-    # 这里为了简化，直接做 Argmax，通常效果已经足够好
-
-    # 3. Argmax: 核心步骤！
-    # 对每一列(每个点)，看哪一行的概率最大，就选哪一行作为 ID
-    # axis=0 表示沿着“笔画数量”的维度找最大值
+    # Argmax: 选概率最大的那个笔画作为 ID
     stroke_ids = np.argmax(prob_masks, axis=0)
-
     return stroke_ids
 
 
-# =========================================================================
-# 核心函数 2: 数据清洗 (去除 -100 Padding)
-# =========================================================================
 def clean_data_logic(traj, stroke_ids):
     """
-    逻辑来源: utils/pointcloud.py -> remove_padding_v2
+    [算法2] 去除无效数据
+    去除 -100 的 Padding 点，并对齐长度
     """
-    # 1. 维度展平
+    # 维度展平
     if traj.ndim == 3:
         N, Lambda, Dim = traj.shape
         traj = traj.reshape(-1, Dim)
         if stroke_ids is not None and stroke_ids.ndim == 1:
             stroke_ids = np.repeat(stroke_ids, Lambda)
 
-    # 2. 长度对齐
+    # 长度对齐
     if stroke_ids is not None:
         min_len = min(len(traj), len(stroke_ids))
         traj = traj[:min_len]
         stroke_ids = stroke_ids[:min_len]
 
-    # 3. 去除 -100 Padding (关键!)
+    # 核心：去除 -100
     fake_mask = np.all((traj[:, :3] == -100), axis=-1)
-
     valid_traj = traj[~fake_mask]
     valid_ids = None if stroke_ids is None else stroke_ids[~fake_mask]
 
     return valid_traj, valid_ids
 
 
+def sort_points_greedy(points):
+    """
+    [算法3] 恢复时间顺序 (贪心/最近邻算法)
+    原理：找一个端点开始，每次找最近的下一个点
+    """
+    if len(points) <= 1:
+        return points
+
+    pts = np.array(points)
+    N = len(pts)
+    visited = np.zeros(N, dtype=bool)
+    ordered_indices = []
+
+    # --- 启发式找起点 ---
+    # 简单的逻辑：找离几何中心最远的点，通常是端点
+    centroid = np.mean(pts, axis=0)
+    dists_from_center = np.linalg.norm(pts - centroid, axis=1)
+    start_idx = np.argmax(dists_from_center)
+
+    current_idx = start_idx
+    ordered_indices.append(current_idx)
+    visited[current_idx] = True
+
+    # --- 贪心搜索 ---
+    for _ in range(N - 1):
+        last_pt = pts[current_idx]
+
+        # 计算到所有点的距离
+        dists = np.linalg.norm(pts - last_pt, axis=1)
+        # 已访问过的设为无限大
+        dists[visited] = np.inf
+
+        # 找最近的
+        next_idx = np.argmin(dists)
+
+        ordered_indices.append(next_idx)
+        visited[next_idx] = True
+        current_idx = next_idx
+
+    return pts[ordered_indices]
+
+
+# =========================================================================
+# 主程序
 # =========================================================================
 
 def main():
-    # 3. 场景配置
+    # 1. 场景设置
     sim_cfg = SimulationCfg(dt=0.01, device=args_cli.device)
     sim = SimulationContext(sim_cfg)
 
@@ -90,18 +126,27 @@ def main():
     cfg_ground = sim_utils.GroundPlaneCfg()
     cfg_ground.func("/World/GroundPlane", cfg_ground)
 
-    # 4. 定义调色盘 (12种颜色)
+    # 2. 定义调色盘 (12色循环)
     palette = [
-        (0.89, 0.10, 0.11), (0.22, 0.49, 0.72), (0.30, 0.69, 0.29), (0.60, 0.31, 0.64),
-        (1.00, 0.50, 0.00), (1.00, 1.00, 0.20), (0.65, 0.34, 0.16), (0.97, 0.51, 0.75),
-        (0.60, 0.60, 0.60), (0.00, 0.00, 0.00), (0.50, 1.00, 1.00), (0.50, 0.00, 0.00),
+        (1.0, 0.0, 0.0),  # 红
+        (0.0, 1.0, 0.0),  # 绿
+        (0.0, 0.0, 1.0),  # 蓝
+        (1.0, 1.0, 0.0),  # 黄
+        (0.0, 1.0, 1.0),  # 青
+        (1.0, 0.0, 1.0),  # 品红
+        (1.0, 0.5, 0.0),  # 橙
+        (0.5, 0.0, 0.5),  # 紫
+        (0.5, 0.5, 0.5),  # 灰
+        (0.0, 0.0, 0.0),  # 黑
+        (0.5, 1.0, 0.5),  # 浅绿
+        (0.5, 0.0, 0.0),  # 深红
     ]
-    num_colors = len(palette)
 
+    # 创建 markers 配置
     markers_dict = {}
     for i, color in enumerate(palette):
         markers_dict[f"marker_{i}"] = sim_utils.SphereCfg(
-            radius=0.035,  # 稍微调大一点点，让线条更连续
+            radius=0.035,
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=color)
         )
 
@@ -111,62 +156,62 @@ def main():
     )
     path_visualizer = VisualizationMarkers(marker_cfg)
 
-    # 5. 加载数据
-    print(f"[INFO] Loading file: {args_cli.file}")
-    points_tensor = None
-    indices_tensor = None
+    # 3. 数据处理流水线
+    print(f"[INFO] Processing file: {args_cli.file}")
+
+    # 最终播放列表：元素为 (Tensor点集, 颜色ID)
+    animation_sequence = []
 
     try:
         data = np.load(args_cli.file, allow_pickle=True).item()
         idx = args_cli.index
 
-        # A. 获取轨迹
+        # A. 获取原始数据
         traj = data.get('traj_pred')[idx] if 'traj_pred' in data else data.get('traj')[idx]
 
-        # B. 获取/计算 ID (核心修复部分)
-        stroke_ids = None
-
-        # 优先查找 'pred_stroke_masks' (预测掩膜)，这是画出整齐颜色的关键！
+        # B. 获取并修复 ID
         if 'pred_stroke_masks' in data:
-            print("[INFO] Found 'pred_stroke_masks'. Computing IDs via Argmax...")
-            masks = data['pred_stroke_masks'][idx]  # Shape: [N_Strokes, N_Points]
-
-            # === 调用计算函数 ===
-            stroke_ids = compute_ids_from_masks(masks)
-            # =================
-
+            print("[INFO] Computing clean IDs from masks...")
+            stroke_ids = compute_ids_from_masks(data['pred_stroke_masks'][idx])
         elif 'stroke_ids_pred' in data:
-            print("[INFO] Using existing 'stroke_ids_pred'.")
             stroke_ids = data['stroke_ids_pred'][idx]
-        elif 'stroke_ids' in data:
-            print("[INFO] Using Ground Truth 'stroke_ids'.")
+        else:
             stroke_ids = data['stroke_ids'][idx]
 
-        print(f"[DEBUG] Traj Shape: {traj.shape}")
-        if stroke_ids is not None:
-            print(f"[DEBUG] IDs Shape: {stroke_ids.shape}")
-
-        # C. 数据清洗 (-100 Padding)
+        # C. 清洗 (-100 padding)
         traj_clean, ids_clean = clean_data_logic(traj, stroke_ids)
 
         if len(traj_clean) == 0:
-            print("[WARN] Valid trajectory is empty!")
+            print("[ERROR] No valid data found!")
+            return
 
         # D. 坐标变换
-        if traj_clean.shape[-1] > 3:
-            traj_clean = traj_clean[:, :3]
+        if traj_clean.shape[-1] > 3: traj_clean = traj_clean[:, :3]
         traj_clean[:, 2] += args_cli.z_offset
         traj_clean = traj_clean * args_cli.scale
 
-        # E. 转 Tensor
-        points_tensor = torch.from_numpy(traj_clean).float().to(sim.device)
+        # E. 分组并排序 (关键步骤)
+        unique_ids = np.unique(ids_clean)
+        print(f"[INFO] Found {len(unique_ids)} unique paths. Sorting points...")
 
-        if ids_clean is not None:
-            # 取余数映射颜色
-            ids_clean = ids_clean.astype(np.int64) % num_colors
-            indices_tensor = torch.from_numpy(ids_clean).to(device=sim.device, dtype=torch.long)
-        else:
-            indices_tensor = torch.arange(len(points_tensor), device=sim.device) % num_colors
+        for uid in unique_ids:
+            # 1. 提取当前 Path 的所有点
+            mask = (ids_clean == uid)
+            points_group = traj_clean[mask]
+
+            # 2. 对这一组点进行排序 (恢复时间顺序)
+            sorted_group = sort_points_greedy(points_group)
+
+            # 3. 存入序列 (转为 Tensor)
+            pts_tensor = torch.from_numpy(sorted_group).float().to(sim.device)
+            # 颜色 ID 取余数
+            color_id = int(uid) % len(palette)
+
+            animation_sequence.append({
+                "points": pts_tensor,
+                "color": color_id,
+                "count": len(pts_tensor)
+            })
 
     except Exception as e:
         print(f"[ERROR] {e}")
@@ -174,21 +219,77 @@ def main():
         traceback.print_exc()
         return
 
-    # 6. 渲染循环
+    # 4. 动画循环
     sim.reset()
-    if points_tensor is not None and len(points_tensor) > 0:
-        center = points_tensor.mean(dim=0).cpu().numpy()
-        sim.set_camera_view(eye=center + [3.0, 3.0, 3.0], target=center)
 
-    print("[INFO] Visualizing...")
+    # 设置相机看第一条路径的起点
+    if len(animation_sequence) > 0:
+        center = animation_sequence[0]["points"][0].cpu().numpy()
+        sim.set_camera_view(eye=center + [2.0, 2.0, 2.0], target=center)
+
+    print("[INFO] Playing Animation...")
+
+    # 状态变量
+    current_path_idx = 0  # 当前画第几条线
+    current_point_idx = 0  # 当前线画到了第几个点
+    timer = 0.0
+
+    # 用于存储已经画完的所有线的点和颜色 (用于保持显示)
+    static_points = []
+    static_indices = []
+
     while simulation_app.is_running():
-        if points_tensor is not None:
-            n = min(len(points_tensor), len(indices_tensor))
-            if n > 0:
-                path_visualizer.visualize(
-                    translations=points_tensor[:n],
-                    marker_indices=indices_tensor[:n]
-                )
+        dt = sim.get_physics_dt()
+        timer += dt
+
+        # --- 更新逻辑 ---
+        if timer >= args_cli.speed:
+            timer = 0.0
+
+            # 如果还有线没画完
+            if current_path_idx < len(animation_sequence):
+                path_data = animation_sequence[current_path_idx]
+
+                # 当前线往前画一个点
+                if current_point_idx < path_data["count"]:
+                    current_point_idx += 1
+                else:
+                    # 当前线画完了，把它的数据存入"静态列表"
+                    static_points.append(path_data["points"])
+                    # 生成对应的颜色索引 Tensor
+                    idx_tensor = torch.full((path_data["count"],), path_data["color"], device=sim.device,
+                                            dtype=torch.long)
+                    static_indices.append(idx_tensor)
+
+                    # 切换到下一条线
+                    current_path_idx += 1
+                    current_point_idx = 0
+
+        # --- 渲染逻辑 ---
+        # 1. 收集所有已完成的线
+        to_draw_points = list(static_points)
+        to_draw_indices = list(static_indices)
+
+        # 2. 加入当前正在画的线 (动态部分)
+        if current_path_idx < len(animation_sequence):
+            path_data = animation_sequence[current_path_idx]
+            if current_point_idx > 0:
+                # 只取前 current_point_idx 个点
+                to_draw_points.append(path_data["points"][:current_point_idx])
+                # 生成对应的颜色
+                idx_tensor = torch.full((current_point_idx,), path_data["color"], device=sim.device, dtype=torch.long)
+                to_draw_indices.append(idx_tensor)
+
+        # 3. 拼接并绘制
+        if len(to_draw_points) > 0:
+            final_points = torch.cat(to_draw_points)
+            final_indices = torch.cat(to_draw_indices)
+
+            path_visualizer.visualize(
+                translations=final_points,
+                marker_indices=final_indices
+            )
+
         sim.step()
 
 
