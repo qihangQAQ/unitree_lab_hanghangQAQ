@@ -156,3 +156,45 @@ def terrain_levels_pos(
 
     # 返回这些 env 的平均地形等级（和原来的 velocity 版本保持一致）
     return torch.mean(terrain.terrain_levels[env_ids].float())
+
+
+def hand_tracking_levels(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    reward_term_name: str = "ee_pos_tracking",
+) -> torch.Tensor:
+    """
+    喷漆任务的课程学习（只针对喷枪速度）：
+
+    - 初始速度范围: (0.10, 0.10) m/s
+    - 每次课程提升: +0.05 m/s (5 cm/s)
+    - 最大速度上限: 0.40 m/s
+    - 触发条件: 当前 episode 平均 reward > 0.8 * reward_weight
+    """
+
+    # 1. 拿到 hand_tracking 命令项
+    command_term = env.command_manager.get_term("hand_tracking")
+    ranges = command_term.cfg.ranges
+    limit_ranges = command_term.cfg.limit_ranges
+
+    # 2. 当前 episode 的平均奖励（按时间归一）
+    reward_term = env.reward_manager.get_term_cfg(reward_term_name)
+    mean_reward = (
+        torch.mean(env.reward_manager._episode_sums[reward_term_name][env_ids])
+        / env.max_episode_length_s
+    )
+
+    # 3. 每个 episode 结束时，检查是否升级课程
+    if env.common_step_counter % env.max_episode_length == 0:
+        if mean_reward > reward_term.weight * 0.8:
+
+            # === 只升级喷枪速度 ===
+            step_v = 0.05  # 5 cm/s
+            cur_v_min, cur_v_max = ranges.velocity
+            lim_v_min, lim_v_max = limit_ranges.velocity
+
+            new_v_max = min(cur_v_max + step_v, lim_v_max)
+            ranges.velocity = (cur_v_min, new_v_max)
+
+    # 4. 返回当前课程“难度指标”（用于日志）
+    return torch.tensor(ranges.velocity[1], device=env.device)

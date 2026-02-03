@@ -746,3 +746,82 @@ def obstacle_collision(
 
     # 靠近目标时碰撞惩罚增加（例如 5 倍），防止机器人在最后一刻为了冲向目标而撞击障碍物
     return reward * (1.0 + 4.0 * near_goal)
+
+def ee_reach_pos_target_soft(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """
+    末端位置追踪奖励（软约束）。
+    
+    逻辑：
+    HandTrackingCommand 的 command[:, 0:3] 已经是 Body坐标系下的位置误差。
+    我们直接最小化这个误差的模长。
+    """
+    # 获取命令张量: (N, 7) -> [pos_err(3), rot_err(3), speed(1)]
+    command = env.command_manager.get_command(command_name)
+    
+    # 提取位置误差向量
+    pos_error_vec = command[:, 0:3]
+    
+    # 计算欧几里得距离 L2 Norm
+    distance = torch.norm(pos_error_vec, dim=-1)
+    
+    # 软约束核函数: 1 / (1 + (d/std)^2)
+    return 1.0 / (1.0 + torch.square(distance / std))
+
+
+def reach_rot_target(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """
+    末端姿态追踪奖励。
+    
+    逻辑：
+    HandTrackingCommand 的 command[:, 3:6] 是 Body坐标系下的旋转误差(Axis-Angle)。
+    """
+    command = env.command_manager.get_command(command_name)
+    
+    # 提取旋转误差向量
+    rot_error_vec = command[:, 3:6]
+    
+    # 模长即为角度误差 (弧度)
+    angle_error = torch.norm(rot_error_vec, dim=-1)
+    
+    # 软约束核函数
+    return 1.0 / (1.0 + torch.square(angle_error / std))
+
+
+def ee_velocity_tracking(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    ee_body_name: str,
+    std: float
+) -> torch.Tensor:
+    # 1) command: 可能是 (N, 7) / (N, 7, 1) / (N, 7, K)
+    command = env.command_manager.get_command(command_name)
+
+    # 取第 7 维速度，并压成 (N,)
+    desired_speed = command[:, 6]
+    # 如果还有多余维度（如 (N,1) / (N,K)），统一 squeeze/选取
+    if desired_speed.ndim > 1:
+        desired_speed = desired_speed.squeeze(-1)
+    # 兜底：保证最终是一维
+    desired_speed = desired_speed.view(-1)
+
+    # 2) actual ee speed
+    asset: Articulation = env.scene[asset_cfg.name]
+    body_idx = asset.find_bodies(ee_body_name)[0]
+    ee_lin_vel = asset.data.body_lin_vel_w[:, body_idx, :]   # (N, 3)
+
+    current_speed = torch.norm(ee_lin_vel, dim=-1)          # (N,)
+    if current_speed.ndim > 1:
+        current_speed = current_speed.squeeze(-1)
+    current_speed = current_speed.view(-1)
+
+    # 3) error & reward (N,)
+    speed_error = (current_speed - desired_speed).abs()      # (N,)
+    rew = 1.0 / (1.0 + (speed_error / std) ** 2)             # (N,)
+
+    # 4) hard guarantee
+    return rew.view(env.num_envs)

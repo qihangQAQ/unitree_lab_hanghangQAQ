@@ -12,7 +12,7 @@ class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     # ============== 新增wandb ===========
     logger = "wandb"                            # ← 开启 wandb
-    wandb_project = "Unitree_g1_Velocity"       # ← wandb 项目名
+    wandb_project = "Unitree_g1_Hand_tracking"       # ← wandb 项目名
     run_name = "hanghangQAQ"                           # ← 自定义 run 名
     # ===================================
     
