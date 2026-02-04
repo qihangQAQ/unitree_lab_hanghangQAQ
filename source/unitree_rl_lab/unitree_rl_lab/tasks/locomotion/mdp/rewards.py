@@ -747,26 +747,30 @@ def obstacle_collision(
     # 靠近目标时碰撞惩罚增加（例如 5 倍），防止机器人在最后一刻为了冲向目标而撞击障碍物
     return reward * (1.0 + 4.0 * near_goal)
 
+# ==============================================================================
+# Hand Tracking Rewards (Matched with HandTrackingCommand outputs)
+# ==============================================================================
+
 def ee_reach_pos_target_soft(
     env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
     """
-    末端位置追踪奖励（软约束）。
+    [任务奖励] 右手末端位置跟踪期望位置。
     
-    逻辑：
-    HandTrackingCommand 的 command[:, 0:3] 已经是 Body坐标系下的位置误差。
-    我们直接最小化这个误差的模长。
+    逻辑:
+    HandTrackingCommand 的 command[:, 0:3] 已经是 Body坐标系下的位置误差向量 (Target - Current)。
+    我们直接计算该误差的模长，并给予软约束奖励。
     """
-    # 获取命令张量: (N, 7) -> [pos_err(3), rot_err(3), speed(1)]
+    # 1. 获取命令张量 (N, 7)
     command = env.command_manager.get_command(command_name)
     
-    # 提取位置误差向量
+    # 2. 提取位置误差向量 (前3维)
     pos_error_vec = command[:, 0:3]
     
-    # 计算欧几里得距离 L2 Norm
+    # 3. 计算欧几里得距离 (L2 Norm)
     distance = torch.norm(pos_error_vec, dim=-1)
     
-    # 软约束核函数: 1 / (1 + (d/std)^2)
+    # 4. 计算奖励: 1 / (1 + (d/std)^2)
     return 1.0 / (1.0 + torch.square(distance / std))
 
 
@@ -774,54 +778,97 @@ def reach_rot_target(
     env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
     """
-    末端姿态追踪奖励。
-    
-    逻辑：
-    HandTrackingCommand 的 command[:, 3:6] 是 Body坐标系下的旋转误差(Axis-Angle)。
+        [任务奖励] 右手调整姿态，使喷射轴 (1,0,0) [X轴] 对准法向量负方向。
+
+        逻辑:
+        具体的对齐计算（如 X轴对齐-Normal）已经在 HandTrackingCommand 内部完成。
+
+        command[:, 3:6] 输出的是计算好的 旋转误差向量。
+
     """
+    # 1. 获取命令张量
     command = env.command_manager.get_command(command_name)
-    
-    # 提取旋转误差向量
+
+    # 2. 提取旋转误差向量 (中间3维)
     rot_error_vec = command[:, 3:6]
-    
-    # 模长即为角度误差 (弧度)
+
+    # 3. 计算角度误差 (旋转向量的模长即为旋转角度 radians)
     angle_error = torch.norm(rot_error_vec, dim=-1)
-    
-    # 软约束核函数
+
+    # 4. 计算奖励
     return 1.0 / (1.0 + torch.square(angle_error / std))
 
 
 def ee_velocity_tracking(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    asset_cfg: SceneEntityCfg,
-    ee_body_name: str,
-    std: float
+        env: ManagerBasedRLEnv,
+        command_name: str,
+        asset_cfg: SceneEntityCfg,
+        ee_body_name: str,
+        std: float
 ) -> torch.Tensor:
-    # 1) command: 可能是 (N, 7) / (N, 7, 1) / (N, 7, K)
+    """
+    [任务奖励] 右手末端速度跟踪期望速度。
+    """
+    # 1. 获取期望速度
     command = env.command_manager.get_command(command_name)
-
-    # 取第 7 维速度，并压成 (N,)
     desired_speed = command[:, 6]
-    # 如果还有多余维度（如 (N,1) / (N,K)），统一 squeeze/选取
+
     if desired_speed.ndim > 1:
         desired_speed = desired_speed.squeeze(-1)
-    # 兜底：保证最终是一维
-    desired_speed = desired_speed.view(-1)
 
-    # 2) actual ee speed
+    # 2. 获取实际末端速度
     asset: Articulation = env.scene[asset_cfg.name]
-    body_idx = asset.find_bodies(ee_body_name)[0]
-    ee_lin_vel = asset.data.body_lin_vel_w[:, body_idx, :]   # (N, 3)
 
-    current_speed = torch.norm(ee_lin_vel, dim=-1)          # (N,)
-    if current_speed.ndim > 1:
-        current_speed = current_speed.squeeze(-1)
-    current_speed = current_speed.view(-1)
+    # 【修复点】find_bodies 返回 ([idx], [name])，我们要取列表里的第一个 整数
+    # body_idx 现在是一个整数 (int)，而不是列表 ([int])
+    body_idx = asset.find_bodies(ee_body_name)[0][0]
 
-    # 3) error & reward (N,)
-    speed_error = (current_speed - desired_speed).abs()      # (N,)
-    rew = 1.0 / (1.0 + (speed_error / std) ** 2)             # (N,)
+    # 使用整数索引，结果 shape 为 (N, 3)
+    ee_lin_vel = asset.data.body_lin_vel_w[:, body_idx, :]
 
-    # 4) hard guarantee
-    return rew.view(env.num_envs)
+    # (N,)
+    current_speed = torch.norm(ee_lin_vel, dim=-1)
+
+    # 3. 计算速度误差 (N,) - (N,) = (N,) -> 正常
+    speed_error = torch.abs(current_speed - desired_speed)
+
+    return 1.0 / (1.0 + torch.square(speed_error / std))
+
+
+def ee_move_towards_target(
+        env: ManagerBasedRLEnv,
+        command_name: str,
+        asset_cfg: SceneEntityCfg,
+        ee_body_name: str,
+) -> torch.Tensor:
+    """
+    [引导奖励] 鼓励末端速度向量 投影到 目标方向 上为正。
+    奖励 = dot(vel_ee, dir_to_target)
+    """
+    # 1. 获取目标位置 和 当前末端位置
+    command = env.command_manager.get_command(command_name)
+    # command[:, 0:3] 已经是 (Target - Current) 的向量了 (Body Frame)
+    # 但我们需要 World Frame 或者统一坐标系。
+    # 这里我们直接重新算 World Frame 下的向量比较稳妥
+
+    cmd_term = env.command_manager.get_term(command_name)
+    target_pos_w = cmd_term.curr_pos_w  # 这是我们在 tracking_command.py 里存的
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    body_idx = asset.find_bodies(ee_body_name)[0][0]
+
+    ee_pos_w = asset.data.body_pos_w[:, body_idx, :]
+    ee_vel_w = asset.data.body_lin_vel_w[:, body_idx, :]
+
+    # 2. 计算指向目标的单位向量
+    target_vec = target_pos_w - ee_pos_w
+    dist = torch.norm(target_vec, dim=-1, keepdim=True)
+    target_dir = target_vec / (dist + 1e-5)
+
+    # 3. 计算速度在目标方向上的投影
+    # v_proj > 0 表示正在靠近，v_proj < 0 表示正在远离
+    vel_proj = torch.sum(ee_vel_w * target_dir, dim=-1)
+
+    # 4. 只奖励正向速度 (靠近给分，远离不扣分或扣分)
+    # 这里我们给一个简单的线性奖励
+    return vel_proj

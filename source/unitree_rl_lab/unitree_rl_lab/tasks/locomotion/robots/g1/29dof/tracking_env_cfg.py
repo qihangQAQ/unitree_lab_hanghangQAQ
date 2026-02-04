@@ -180,12 +180,14 @@ class CommandsCfg:
         resampling_time_range=(1.0e9, 1.0e9),
         ee_link_idx=29, 
         step_dt=0.02,
+        height_limits = (0.35, 1.8), # 随机轨迹点生成范围
 
         # 默认值
         default_velocity=0.10,
         default_spacing=0.01,
         default_standoff=0.05,
         default_path_length=1.2,
+
 
 
         # 【初始难度】(起跑线)
@@ -300,7 +302,7 @@ class RewardsCfg:
 # [新增] 位置追踪
     ee_pos_tracking = RewTerm(
         func=mdp.ee_reach_pos_target_soft, # 指向刚才写的函数
-        weight=1.5,                   # 权重最高，位置最重要
+        weight=2.0,                   # 权重最高，位置最重要
         params={
             "command_name": "hand_tracking", 
             "std": 0.1  # 10cm 的误差容忍度 (根据需要调整，越小越严)
@@ -322,12 +324,23 @@ class RewardsCfg:
     # 即使速度掉到 10cm/s 或 飙到 40cm/s，奖励也不会直接归零，给转弯留余地。
     ee_vel_tracking = RewTerm(
         func=mdp.ee_velocity_tracking,
-        weight=3.0,
+        weight=2.5,
         params={
             "command_name": "hand_tracking", 
             "asset_cfg": SceneEntityCfg("robot"),
             "ee_body_name": "right_wrist_roll_link", # <--- 【注意】改为 G1 真实的右手末端名字
             "std": 0.25 
+        },
+    )
+
+    # [新增] 引导奖励：鼓励往目标方向跑
+    ee_move_towards = RewTerm(
+        func=mdp.ee_move_towards_target,
+        weight=0.5,  # 这是一个辅助引导，权重不需要太大
+        params={
+            "command_name": "hand_tracking",
+            "asset_cfg": SceneEntityCfg("robot"),
+            "ee_body_name": "right_wrist_roll_link",
         },
     )
 
