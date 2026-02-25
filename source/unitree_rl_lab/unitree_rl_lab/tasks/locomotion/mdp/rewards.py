@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 Joint penalties.
 """
 
+
 # quat → yaw
 def _quat_to_yaw(quat: torch.Tensor) -> torch.Tensor:
     """从 (w, x, y, z) 四元数提取 yaw，返回 shape (N,)"""
@@ -31,8 +32,10 @@ def _quat_to_yaw(quat: torch.Tensor) -> torch.Tensor:
     yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
     return yaw
 
+
 def wrap_to_pi(x: torch.Tensor) -> torch.Tensor:
     return (x + math.pi) % (2 * math.pi) - math.pi
+
 
 def quat_to_yaw(q: torch.Tensor) -> torch.Tensor:
     """q: (..., 4) world quaternion. Returns yaw in radians."""
@@ -64,7 +67,7 @@ def energy(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("r
 
 
 def stand_still(
-    env: ManagerBasedRLEnv, command_name: str = "base_velocity", asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+        env: ManagerBasedRLEnv, command_name: str = "base_velocity", asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     asset: Articulation = env.scene[asset_cfg.name]
 
@@ -79,7 +82,7 @@ Robot.
 
 
 def orientation_l2(
-    env: ManagerBasedRLEnv, desired_gravity: list[float], asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+        env: ManagerBasedRLEnv, desired_gravity: list[float], asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     """Reward the agent for aligning its gravity with the desired gravity vector using L2 squared kernel."""
     # extract the used quantities (to enable type-hinting)
@@ -100,7 +103,7 @@ def upward(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("r
 
 
 def joint_position_penalty(
-    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, stand_still_scale: float, velocity_threshold: float
+        env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, stand_still_scale: float, velocity_threshold: float
 ) -> torch.Tensor:
     """Penalize joint position error from default on the articulation."""
     # extract the used quantities (to enable type-hinting)
@@ -127,11 +130,11 @@ def feet_stumble(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Te
 
 
 def feet_height_body(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    asset_cfg: SceneEntityCfg,
-    target_height: float,
-    tanh_mult: float,
+        env: ManagerBasedRLEnv,
+        command_name: str,
+        asset_cfg: SceneEntityCfg,
+        target_height: float,
+        tanh_mult: float,
 ) -> torch.Tensor:
     """Reward the swinging feet for clearing a specified height off the ground"""
     asset: RigidObject = env.scene[asset_cfg.name]
@@ -153,7 +156,7 @@ def feet_height_body(
 
 
 def foot_clearance_reward(
-    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, target_height: float, std: float, tanh_mult: float
+        env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, target_height: float, std: float, tanh_mult: float
 ) -> torch.Tensor:
     """Reward the swinging feet for clearing a specified height off the ground"""
     asset: RigidObject = env.scene[asset_cfg.name]
@@ -164,7 +167,7 @@ def foot_clearance_reward(
 
 
 def feet_too_near(
-    env: ManagerBasedRLEnv, threshold: float = 0.2, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+        env: ManagerBasedRLEnv, threshold: float = 0.2, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     asset: Articulation = env.scene[asset_cfg.name]
     feet_pos = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
@@ -173,7 +176,7 @@ def feet_too_near(
 
 
 def feet_contact_without_cmd(
-    env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, command_name: str = "base_velocity"
+        env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, command_name: str = "base_velocity"
 ) -> torch.Tensor:
     """
     Reward for feet contact when the command is zero.
@@ -207,12 +210,12 @@ Feet Gait rewards.
 
 
 def feet_gait(
-    env: ManagerBasedRLEnv,
-    period: float,
-    offset: list[float],
-    sensor_cfg: SceneEntityCfg,
-    threshold: float = 0.5,
-    command_name=None,
+        env: ManagerBasedRLEnv,
+        period: float,
+        offset: list[float],
+        sensor_cfg: SceneEntityCfg,
+        threshold: float = 0.5,
+        command_name=None,
 ) -> torch.Tensor:
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     is_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0
@@ -264,9 +267,9 @@ def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
 
 # 新增0.command_duration_mask（掩码计算）
 def _command_duration_mask(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    duration: float,
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        duration: float,
 ) -> torch.Tensor:
     """基于 position_command.command_time_left 做一个时间窗 mask。
 
@@ -281,11 +284,12 @@ def _command_duration_mask(
     duration_safe = max(float(duration), 1e-6)
     return mask.float() / duration_safe
 
+
 # 新增1.reach_pos_target_soft（软位置追踪）
 def reach_pos_target_soft(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """软距离奖励: 1 / (1 + (d / sigma_soft)^2)，再乘时间窗 mask。
 
@@ -308,18 +312,18 @@ def reach_pos_target_soft(
     # return base_rew * _command_duration_mask(env, command_name, params.rew_duration)
     return base_rew
 
+
 # 新增2.reach_pos_target_tight（硬位置追踪）
 def reach_pos_target_tight(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """更严格的位置奖励：使用更小的 sigma_tight、时间窗更短。"""
 
     asset: Articulation = env.scene[asset_cfg.name]
     cmd_term = env.command_manager.get_term(command_name)
     params = env.cfg.pos_reward_params
-
 
     target_xy = cmd_term.position_targets[:, :2]
     base_xy = asset.data.root_pos_w[:, :2]
@@ -331,13 +335,13 @@ def reach_pos_target_tight(
     return base_rew * _command_duration_mask(env, command_name, params.rew_duration / 2.0)
     # return base_rew
 
+
 # 新增3.reach_heading_target（朝向追踪）
 def reach_heading_target(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-
     """在接近目标位置后，根据 heading 误差给奖励。"""
     asset: Articulation = env.scene[asset_cfg.name]
     cmd_term = env.command_manager.get_term(command_name)
@@ -363,11 +367,10 @@ def reach_heading_target(
 
 # 新增4.velo_dir（沿目标方向运动）
 def velo_dir(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-
     """沿着目标方向移动的奖励。
         远离目标时：奖励“沿目标方向的前向速度”；接近目标时给常数 1。"""
     asset: Articulation = env.scene[asset_cfg.name]
@@ -404,9 +407,9 @@ def velo_dir(
 
 # 新增5.stand_still_pos（到点后的站姿）
 def stand_still_pos(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """到点之后站姿偏离默认姿态的“偏差量”。
        在 cfg 中配置负的 weight，将这个偏差当成惩罚。
@@ -438,9 +441,9 @@ def stand_still_pos(
 
 # 新增6.nomove（远离目标时发呆惩罚）
 def nomove(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """远离目标时，速度很小而且面朝反方向的惩罚（在 cfg 中配负权重）。
 
@@ -482,11 +485,10 @@ def nomove(
 
 # 新增7.termination（接近目标时摔倒惩罚加倍）
 def termination(
-    env: "ManagerBasedRLEnv",
-    command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        env: "ManagerBasedRLEnv",
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-
     asset = env.scene[asset_cfg.name]
     cmd_term = env.command_manager.get_term(command_name)
     params = env.cfg.pos_reward_params
@@ -671,6 +673,7 @@ def foot_clearance_reward(
     reward = foot_z_target_error * foot_velocity_tanh
     return torch.exp(-torch.sum(reward, dim=1) / std)
 
+
 def foot_clearance_reward_position(
     env: "ManagerBasedRLEnv",
     asset_cfg: SceneEntityCfg,
@@ -710,6 +713,7 @@ def foot_clearance_reward_position(
 
     return base_reward * gate
 
+
 def obstacle_collision(
         env: ManagerBasedRLEnv,
         threshold: float = 1.0,
@@ -747,55 +751,45 @@ def obstacle_collision(
     # 靠近目标时碰撞惩罚增加（例如 5 倍），防止机器人在最后一刻为了冲向目标而撞击障碍物
     return reward * (1.0 + 4.0 * near_goal)
 
+
 # ==============================================================================
-# Hand Tracking Rewards (Matched with HandTrackingCommand outputs)
+# Hand Tracking Rewards (Matched with 25-D HandTrackingCommand outputs)
 # ==============================================================================
 
 def ee_reach_pos_target_soft(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+        env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
     """
-    [任务奖励] 右手末端位置跟踪期望位置。
-    
-    逻辑:
-    HandTrackingCommand 的 command[:, 0:3] 已经是 Body坐标系下的位置误差向量 (Target - Current)。
-    我们直接计算该误差的模长，并给予软约束奖励。
+    [任务奖励 - 软] 引导末端靠近当前目标点 (容忍度较大，如 10cm)
     """
-    # 1. 获取命令张量 (N, 7)
     command = env.command_manager.get_command(command_name)
-    
-    # 2. 提取位置误差向量 (前3维)
-    pos_error_vec = command[:, 0:3]
-    
-    # 3. 计算欧几里得距离 (L2 Norm)
+    pos_error_vec = command[:, 0:3]  # 0cm处的位置误差
     distance = torch.norm(pos_error_vec, dim=-1)
-    
-    # 4. 计算奖励: 1 / (1 + (d/std)^2)
     return 1.0 / (1.0 + torch.square(distance / std))
 
 
-def reach_rot_target(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+def ee_reach_pos_target_tight(
+        env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
     """
-        [任务奖励] 右手调整姿态，使喷射轴 (1,0,0) [X轴] 对准法向量负方向。
-
-        逻辑:
-        具体的对齐计算（如 X轴对齐-Normal）已经在 HandTrackingCommand 内部完成。
-
-        command[:, 3:6] 输出的是计算好的 旋转误差向量。
-
+    [任务奖励 - 硬] 要求末端极其精准地贴合当前目标点 (容忍度极小，如 2cm)
+    这是决定喷漆质量的核心奖励。采用指数形式让梯度在近处更敏锐。
     """
-    # 1. 获取命令张量
     command = env.command_manager.get_command(command_name)
+    pos_error_vec = command[:, 0:3]
+    distance = torch.norm(pos_error_vec, dim=-1)
+    return torch.exp(-(distance / std) ** 2)
 
-    # 2. 提取旋转误差向量 (中间3维)
-    rot_error_vec = command[:, 3:6]
 
-    # 3. 计算角度误差 (旋转向量的模长即为旋转角度 radians)
+def reach_rot_target(
+        env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """
+    [任务奖励] 喷枪姿态对齐 (X轴对准表面法向负向)
+    """
+    command = env.command_manager.get_command(command_name)
+    rot_error_vec = command[:, 3:6]  # 0cm处的姿态误差
     angle_error = torch.norm(rot_error_vec, dim=-1)
-
-    # 4. 计算奖励
     return 1.0 / (1.0 + torch.square(angle_error / std))
 
 
@@ -807,68 +801,38 @@ def ee_velocity_tracking(
         std: float
 ) -> torch.Tensor:
     """
-    [任务奖励] 右手末端速度跟踪期望速度。
+    [任务奖励] 末端沿轨迹移动的速度跟踪。
     """
-    # 1. 获取期望速度
     command = env.command_manager.get_command(command_name)
-    desired_speed = command[:, 6]
-
+    # 【修复Bug】期望速度现在在第 25 维 (索引为 24)
+    desired_speed = command[:, 24]
     if desired_speed.ndim > 1:
         desired_speed = desired_speed.squeeze(-1)
 
-    # 2. 获取实际末端速度
     asset: Articulation = env.scene[asset_cfg.name]
-
-    # 【修复点】find_bodies 返回 ([idx], [name])，我们要取列表里的第一个 整数
-    # body_idx 现在是一个整数 (int)，而不是列表 ([int])
     body_idx = asset.find_bodies(ee_body_name)[0][0]
 
-    # 使用整数索引，结果 shape 为 (N, 3)
+    # 提取末端线速度
     ee_lin_vel = asset.data.body_lin_vel_w[:, body_idx, :]
-
-    # (N,)
     current_speed = torch.norm(ee_lin_vel, dim=-1)
 
-    # 3. 计算速度误差 (N,) - (N,) = (N,) -> 正常
     speed_error = torch.abs(current_speed - desired_speed)
-
     return 1.0 / (1.0 + torch.square(speed_error / std))
 
 
-def ee_move_towards_target(
-        env: ManagerBasedRLEnv,
-        command_name: str,
-        asset_cfg: SceneEntityCfg,
-        ee_body_name: str,
+def ee_action_smoothness_penalty(
+        env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:
     """
-    [引导奖励] 鼓励末端速度向量 投影到 目标方向 上为正。
-    奖励 = dot(vel_ee, dir_to_target)
+    [平滑惩罚] 严厉惩罚连续两帧动作变化过大 (Jitter)。
+    喷漆任务对平滑度要求极高，动作抖动会导致喷漆不均。
     """
-    # 1. 获取目标位置 和 当前末端位置
-    command = env.command_manager.get_command(command_name)
-    # command[:, 0:3] 已经是 (Target - Current) 的向量了 (Body Frame)
-    # 但我们需要 World Frame 或者统一坐标系。
-    # 这里我们直接重新算 World Frame 下的向量比较稳妥
-
-    cmd_term = env.command_manager.get_term(command_name)
-    target_pos_w = cmd_term.curr_pos_w  # 这是我们在 tracking_command.py 里存的
-
+    # 提取手臂关节的动作变化率 (只惩罚上肢，腿部不管)
     asset: Articulation = env.scene[asset_cfg.name]
-    body_idx = asset.find_bodies(ee_body_name)[0][0]
+    # 取出上一次动作和当前动作的差值的平方和
+    # 注意：需在环境 observations 里开启 last_action 记录
+    action_diff = env.action_manager.action - env.action_manager.prev_action
 
-    ee_pos_w = asset.data.body_pos_w[:, body_idx, :]
-    ee_vel_w = asset.data.body_lin_vel_w[:, body_idx, :]
-
-    # 2. 计算指向目标的单位向量
-    target_vec = target_pos_w - ee_pos_w
-    dist = torch.norm(target_vec, dim=-1, keepdim=True)
-    target_dir = target_vec / (dist + 1e-5)
-
-    # 3. 计算速度在目标方向上的投影
-    # v_proj > 0 表示正在靠近，v_proj < 0 表示正在远离
-    vel_proj = torch.sum(ee_vel_w * target_dir, dim=-1)
-
-    # 4. 只奖励正向速度 (靠近给分，远离不扣分或扣分)
-    # 这里我们给一个简单的线性奖励
-    return vel_proj
+    # 手臂关节的索引通常是排在后面的（需要根据 G1 具体 DOF 顺序微调，这里先用全关节惩罚替代或切片）
+    # 为简单起见，计算所有关节的动作抖动：
+    return torch.sum(torch.square(action_diff), dim=1)

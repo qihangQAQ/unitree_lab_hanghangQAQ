@@ -174,41 +174,34 @@ class EventCfg:
 #     )
 class CommandsCfg:
     """Command specifications for the MDP."""
-    
     hand_tracking = mdp.HandTrackingCommandCfg(
+
         asset_name="robot",
+        # 设为极大值，强制仅在 episode reset 时才生成新曲线
         resampling_time_range=(1.0e9, 1.0e9),
-        ee_link_idx=29, 
+
+        # G1右手末端 right_wrist_yaw_link
+        ee_link_idx=29,
+
         step_dt=0.02,
-        height_limits = (0.35, 1.8), # 随机轨迹点生成范围
 
-        # 默认值
-        default_velocity=0.10,
-        default_spacing=0.01,
-        default_standoff=0.05,
-        default_path_length=1.2,
-
-
-
-        # 【初始难度】(起跑线)
-        # 课程刚开始时，只允许最简单的范围
-        ranges=mdp.HandTrackingCommandCfg.Ranges(
-            velocity=(0.10, 0.10),    # 喷枪移动速度 初始: 10cm/s
-            standoff=None,    # 喷枪距离被喷墙面距离：初始: 5cm
-            spacing=None,     # 每个path的点间距(假设这个不参与课程，直接给满)
-            path_length=None,   # 每个episode的路径的长度(假设这个不参与课程)
-        ),
-
-        # 【最终难度】(终点线)
-        # 课程学习的目标是将 ranges 慢慢扩大到这里
-        limit_ranges=mdp.HandTrackingCommandCfg.Ranges(
-            velocity=(0.10, 0.40),    # 目标: 40cm/s
-            standoff=None,    # 目标: 15cm
-            spacing=None,
-            path_length=None,
-        ),
-
+        # 喷枪长度15cm
+        gun_length=0.15,
         debug_vis=True,
+
+        # 【修改这里】
+        ranges=mdp.HandTrackingCommandCfg.Ranges(
+            velocity=(0.10, 0.10),  # <--- 上下限都设为 0.10，相当于固定 10cm/s
+            spray_distance=(0.05, 0.10),  # 喷涂距离如果你也想固定，可以改为 (0.05, 0.05)
+            path_length=(1.0, 6.0),
+        ),
+
+        # 这个 limit_ranges 是为你以后的“课程设计”预留的满级目标
+        limit_ranges=mdp.HandTrackingCommandCfg.Ranges(
+            velocity=(0.10, 0.40),
+            spray_distance=(0.05, 0.15),
+            path_length=(3.0, 6.0),
+        )
     )
 
 
@@ -232,19 +225,19 @@ class ObservationsCfg:
         # observation terms (order preserved)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2, noise=Unoise(n_min=-0.2, n_max=0.2))
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
-        
+
         # velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
         # 新增 -- 命令观测
-        target_error = ObsTerm(
-            func=mdp.generated_commands, 
+        tracking_commands = ObsTerm(
+            func=mdp.generated_commands,
             params={"command_name": "hand_tracking"}
         )
-        
+
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05, noise=Unoise(n_min=-1.5, n_max=1.5))
-        
+
         last_action = ObsTerm(func=mdp.last_action)
-        
+
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
 
         def __post_init__(self):
@@ -262,16 +255,17 @@ class ObservationsCfg:
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2)
         projected_gravity = ObsTerm(func=mdp.projected_gravity)
-        
+
         # velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
-        target_error = ObsTerm(
-            func=mdp.generated_commands, 
+        tracking_commands = ObsTerm(
+            func=mdp.generated_commands,
             params={"command_name": "hand_tracking"}
         )
 
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         last_action = ObsTerm(func=mdp.last_action)
+
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
         # height_scanner = ObsTerm(func=mdp.height_scan,
         #     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
@@ -299,49 +293,45 @@ class RewardsCfg:
     #     func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     # )
 
-# [新增] 位置追踪
-    ee_pos_tracking = RewTerm(
-        func=mdp.ee_reach_pos_target_soft, # 指向刚才写的函数
-        weight=2.0,                   # 权重最高，位置最重要
-        params={
-            "command_name": "hand_tracking", 
-            "std": 0.1  # 10cm 的误差容忍度 (根据需要调整，越小越严)
-        },
-    )
-    
-    # [新增] 姿态追踪
-    ee_rot_tracking = RewTerm(
-        func=mdp.reach_rot_target,
-        weight=3.0,
-        params={
-            "command_name": "hand_tracking", 
-            "std": 0.2  # 约 11度 的误差容忍度
-        },
-    )
-    
-    # [新增] 速度追踪 (25cm/s)
-    # std=0.25 表示一个比较宽的“软约束”。
-    # 即使速度掉到 10cm/s 或 飙到 40cm/s，奖励也不会直接归零，给转弯留余地。
-    ee_vel_tracking = RewTerm(
-        func=mdp.ee_velocity_tracking,
-        weight=2.5,
-        params={
-            "command_name": "hand_tracking", 
-            "asset_cfg": SceneEntityCfg("robot"),
-            "ee_body_name": "right_wrist_roll_link", # <--- 【注意】改为 G1 真实的右手末端名字
-            "std": 0.25 
-        },
+    # =================== 喷漆任务核心奖励 ===================
+    # 1. 软位置追踪 (容忍度较大 10cm)，引导致使手臂靠近曲线
+    ee_pos_tracking_soft = RewTerm(
+        func=mdp.ee_reach_pos_target_soft,
+        weight=2.0,
+        params={"command_name": "hand_tracking", "std": 0.10},
     )
 
-    # [新增] 引导奖励：鼓励往目标方向跑
-    ee_move_towards = RewTerm(
-        func=mdp.ee_move_towards_target,
-        weight=0.5,  # 这是一个辅助引导，权重不需要太大
+    # 2. 硬位置追踪 (容忍度极小 2cm)，逼迫高精度贴合
+    ee_pos_tracking_tight = RewTerm(
+        func=mdp.ee_reach_pos_target_tight,
+        weight=3.0,
+        params={"command_name": "hand_tracking", "std": 0.02},
+    )
+
+    # 3. 姿态追踪 (喷枪严格对准墙面)
+    ee_rot_tracking = RewTerm(
+        func=mdp.reach_rot_target,
+        weight=2.5,
+        params={"command_name": "hand_tracking", "std": 0.15},
+    )
+
+    # 4. 速度追踪 (保持匀速移动)
+    ee_vel_tracking = RewTerm(
+        func=mdp.ee_velocity_tracking,
+        weight=2.0,
         params={
             "command_name": "hand_tracking",
             "asset_cfg": SceneEntityCfg("robot"),
-            "ee_body_name": "right_wrist_roll_link",
+            "ee_body_name": "right_wrist_yaw_link",  # G1真实末端
+            "std": 0.10
         },
+    )
+
+    # 5. 动作平滑度惩罚 (喷漆必须丝滑)
+    action_smoothness = RewTerm(
+        func=mdp.ee_action_smoothness_penalty,
+        weight=-0.05,
+        params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
     alive = RewTerm(func=mdp.is_alive, weight=0.15)
@@ -449,9 +439,9 @@ class CurriculumCfg:
     # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
     # lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
     hand_tracking_levels = CurrTerm(
-            func=mdp.hand_tracking_levels,  # 指向刚才写的新函数
-            params={"reward_term_name": "ee_pos_tracking"}
-        )
+        func=mdp.hand_tracking_levels,  # 指向刚才写的新函数
+        params={"reward_term_name": "ee_pos_tracking_tight"}
+    )
 
 
 @configclass
@@ -474,12 +464,12 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 4
-        self.episode_length_s = 20.0
+        self.episode_length_s = 60.0
         # simulation settings
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2 ** 15
 
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
@@ -500,7 +490,27 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 32
-        self.scene.terrain.terrain_generator.num_rows = 2
-        self.scene.terrain.terrain_generator.num_cols = 10
-        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+        super().__post_init__()
+
+        # 1. 减少环境数量：Play 模式不需要 4096 个环境，50 个足够看清动作细节了
+        self.scene.num_envs = 1
+
+        # 2. 地形设置：稍微调整一下规模
+        self.scene.terrain.terrain_generator.num_rows = 5
+        self.scene.terrain.terrain_generator.num_cols = 5
+
+        # 3. 【关键修正】设置命令难度为“最终目标”
+        # 之前的 base_velocity 已经删了，这里要改成 hand_tracking
+        # 将 ranges 直接设为 limit_ranges，让机器人直接挑战最难的指标 (速度 0.4, 距离 0.15 等)
+        self.commands.hand_tracking.ranges = self.commands.hand_tracking.limit_ranges
+
+        # 4. 禁用课程学习 (Curriculum)
+        # Play 阶段不需要难度递增，我们直接看“满级”表现
+        self.curriculum.hand_tracking_levels = None
+        # 如果你有地形课程也可以在这里关掉
+        # self.curriculum.terrain_levels = None
+
+        # 5. (可选) 禁用观测噪声
+        # 如果你想看“完美传感器”下的表现，可以取消注释下面这行。
+        # 但为了测试鲁棒性，通常建议保留噪声。
+        # self.observations.policy.enable_corruption = False
