@@ -489,28 +489,44 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 @configclass
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
-        super().__post_init__()
+        # 1. 必须且只能调用一次父类的初始化
         super().__post_init__()
 
-        # 1. 减少环境数量：Play 模式不需要 4096 个环境，50 个足够看清动作细节了
+        # 2. 环境数量与布局
         self.scene.num_envs = 1
+        self.scene.env_spacing = 0.0  # 只有一个环境，不需要间距
 
-        # 2. 地形设置：稍微调整一下规模
-        self.scene.terrain.terrain_generator.num_rows = 5
-        self.scene.terrain.terrain_generator.num_cols = 5
+        # 3. 地形设置：极简规模，避免渲染过大没用的地形，加快启动速度
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 2
 
-        # 3. 【关键修正】设置命令难度为“最终目标”
-        # 之前的 base_velocity 已经删了，这里要改成 hand_tracking
-        # 将 ranges 直接设为 limit_ranges，让机器人直接挑战最难的指标 (速度 0.4, 距离 0.15 等)
+        # 4. 设置命令难度：Play 模式下，直接挑战“满级”指标
         self.commands.hand_tracking.ranges = self.commands.hand_tracking.limit_ranges
 
-        # 4. 禁用课程学习 (Curriculum)
-        # Play 阶段不需要难度递增，我们直接看“满级”表现
-        self.curriculum.hand_tracking_levels = None
-        # 如果你有地形课程也可以在这里关掉
-        # self.curriculum.terrain_levels = None
+        # [可选] 如果你想固定看它在某一个特定速度下的表现，可以解开这两行：
+        # self.commands.hand_tracking.ranges.velocity = (0.20, 0.20)
+        # self.commands.hand_tracking.ranges.spray_distance = (0.05, 0.05)
 
-        # 5. (可选) 禁用观测噪声
-        # 如果你想看“完美传感器”下的表现，可以取消注释下面这行。
-        # 但为了测试鲁棒性，通常建议保留噪声。
+        # 5. 禁用课程学习 (Curriculum)
+        # Play 阶段不需要难度递增，直接看当前权重的表现
+        self.curriculum.hand_tracking_levels = None
+
+        # 6. 固定重生位置 (去掉随机扰动)
+        # 训练时加扰动是为了鲁棒性，Play 时去掉扰动能让你更清楚地看到它的初始对齐动作
+        self.events.reset_base.params["pose_range"] = {
+            "x": (0.0, 0.0),
+            "y": (0.0, 0.0),
+            "yaw": (0.0, 0.0),
+        }
+
+        # 7. (可选) 禁用观测噪声
+        # 如果你发现 Play 时机器人的手抖得厉害，可以把下面这行取消注释，
+        # 关掉噪声看看是不是策略本身没有学平滑，还是传感器噪声导致的。
         # self.observations.policy.enable_corruption = False
+
+        # 8. 回合时间：可以稍微拉长，看它长时间跟踪稳不稳
+        self.episode_length_s = 60.0
+
+        # reset设定修改
+        self.terminations.base_height = None
+        self.terminations.bad_orientation = None

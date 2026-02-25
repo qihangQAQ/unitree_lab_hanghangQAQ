@@ -112,36 +112,173 @@ class HandTrackingCommand(CommandTerm):
             )
         )
 
+        # ==================== [新增] 红色路径线设置 ====================
+        # 用密集的小红球来模拟红线
+        self.path_markers = VisualizationMarkers(
+            VisualizationMarkersCfg(
+                prim_path="/Visuals/Command/full_path_line",
+                markers={
+                    "sphere": sim_utils.SphereCfg(
+                        radius=0.005,  # 半径设小一点，看起来像线
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0))  # 红色
+                    ),
+                }
+            )
+        )
+        # 用来存储算上法向偏移后，末端真正的运动轨迹 (N, 200, 3)
+        self.path_ee_targets = torch.zeros(self.num_envs, self.num_samples, 3, device=self.device)
+        # ===============================================================
+
+    # def _generate_bezier_curves(self, env_ids: torch.Tensor):
+    #     """
+    #     [要求: 每轮episode开始的时候生成一条贝塞尔曲线（path）]
+    #     """
+    #
+    #     num_resets = len(env_ids)
+    #
+    #     # 1. 采样本轮路径总长度 (1m - 6m)
+    #     r_len = self.cfg.ranges.path_length
+    #     desired_lengths = torch.empty(num_resets, device=self.device).uniform_(*r_len)
+    #
+    #     # 2. 随机生成控制点 (近似长度约束)
+    #     # [要求: 工作空间校验，在机器人的最大臂展半径内（0.8m < R < 1.5m）]
+    #     p0 = torch.zeros(num_resets, 3, device=self.device)
+    #     p0[:, 0] = torch.empty(num_resets, device=self.device).uniform_(0.8, 1.2)  # X: 前方 0.8~1.2m
+    #     p0[:, 1] = torch.empty(num_resets, device=self.device).uniform_(-0.8, 0.8)  # Y: 左右 0.8m
+    #     p0[:, 2] = torch.empty(num_resets, device=self.device).uniform_(0.5, 1.5)  # Z: 高度 0.5~1.5m
+    #
+    #     # 为了保证长度接近 desired_lengths，我们设定三个增量段，每段长度约为 L/3
+    #     segment_len = (desired_lengths / 3.0).unsqueeze(1)
+    #
+    #     # 生成随机方向作为增量
+    #     dir1 = torch.nn.functional.normalize(torch.randn(num_resets, 3, device=self.device), dim=1)
+    #     dir2 = torch.nn.functional.normalize(torch.randn(num_resets, 3, device=self.device), dim=1)
+    #     dir3 = torch.nn.functional.normalize(torch.randn(num_resets, 3, device=self.device), dim=1)
+    #
+    #     # 限制 Z 轴方向不要太剧烈，保证都在墙面上 (限制 X 轴变化)
+    #     dir1[:, 0] *= 0.2;
+    #     dir2[:, 0] *= 0.2;
+    #     dir3[:, 0] *= 0.2
+    #     dir1 = torch.nn.functional.normalize(dir1, dim=1)
+    #     dir2 = torch.nn.functional.normalize(dir2, dim=1)
+    #     dir3 = torch.nn.functional.normalize(dir3, dim=1)
+    #
+    #     p1 = p0 + dir1 * segment_len
+    #     p2 = p1 + dir2 * segment_len
+    #     p3 = p2 + dir3 * segment_len
+    #
+    #     # 3. 离散化贝塞尔曲线
+    #     t = torch.linspace(0, 1, self.num_samples, device=self.device).view(1, -1, 1)
+    #     u = 1 - t
+    #     # (N, num_samples, 3)
+    #     curve = (u ** 3) * p0.unsqueeze(1) + 3 * (u ** 2) * t * p1.unsqueeze(1) + 3 * u * (t ** 2) * p2.unsqueeze(1) + (
+    #                 t ** 3) * p3.unsqueeze(1)
+    #     self.path_points_w[env_ids] = curve
+    #
+    #     # 4. 计算弧长 (Arc Length) 用于后续恒速追踪
+    #     deltas = curve[:, 1:, :] - curve[:, :-1, :]
+    #     dists = torch.norm(deltas, dim=-1)
+    #     # 累加得到每个点的弧长
+    #     arc_lengths = torch.zeros(num_resets, self.num_samples, device=self.device)
+    #     arc_lengths[:, 1:] = torch.cumsum(dists, dim=-1)
+    #     self.path_arc_lengths[env_ids] = arc_lengths
+    #
+    #     # 5. 生成法向量 (假设表面法向大致指向基座，即 -X，加上微小扰动)
+    #     base_normal = torch.tensor([-1.0, 0.0, 0.0], device=self.device).view(1, 1, 3).expand(num_resets,
+    #                                                                                           self.num_samples, 3)
+    #     noise = (torch.rand_like(base_normal) - 0.5) * 0.1
+    #     self.path_normals_w[env_ids] = torch.nn.functional.normalize(base_normal + noise, dim=-1)
+    #
+    # def _resample_command(self, env_ids: Sequence[int]):
+    #     """
+    #     [要求: 每次reset之后（即每个episode开始）触发]
+    #     """
+    #
+    #     num_resets = len(env_ids)
+    #     if num_resets == 0: return
+    #
+    #     # 1. 采样本轮期望速度与喷漆距离
+    #     self.env_speeds[env_ids] = torch.empty(num_resets, device=self.device).uniform_(*self.cfg.ranges.velocity)
+    #     self.env_spray_dists[env_ids] = torch.empty(num_resets, device=self.device).uniform_(
+    #         *self.cfg.ranges.spray_distance)
+    #     self.current_arc_length[env_ids] = 0.0
+    #
+    #     # 2. 生成贝塞尔曲线
+    #     self._generate_bezier_curves(env_ids)
+    #
+    #     # 3. 瞬间传送基座 (Teleport Base) 以对齐末端
+    #     # 获取第一点的目标位姿
+    #     start_p_surf = self.path_points_w[env_ids, 0, :]
+    #     start_n_surf = self.path_normals_w[env_ids, 0, :]
+    #
+    #     # 考虑喷枪与喷漆距离：EE_Target = Surface + (Gun + Spray) * Normal
+    #     total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids]
+    #
+    #     # ==================== [新增] 计算并存储整条轨迹 ====================
+    #     # 把每个点都算上总偏移量 (喷距+枪长)，这就是机器人手腕应该走的绝对路线
+    #     offset_expanded = total_offset.view(-1, 1, 1)
+    #     self.path_ee_targets[env_ids] = (
+    #             self.path_points_w[env_ids] +
+    #             self.path_normals_w[env_ids] * offset_expanded
+    #     )
+    #     # ===============================================================
+    #
+    #     start_p_surf = self.path_points_w[env_ids, 0, :]
+    #     start_n_surf = self.path_normals_w[env_ids, 0, :]
+    #     start_p_ee = start_p_surf + start_n_surf * total_offset.unsqueeze(1)
+    #
+    #     # 计算当前的 EE 和 Base 的相对位置差
+    #     curr_ee_pos_w = self.robot.data.body_state_w[env_ids, self.ee_link_idx, :3]
+    #     curr_base_pos_w = self.robot.data.root_pos_w[env_ids]
+    #
+    #     # 将 Base 平移，使得 EE 移动到 start_p_ee
+    #     offset = start_p_ee - curr_ee_pos_w
+    #     new_base_pos = curr_base_pos_w + offset
+    #
+    #     # 写入仿真 (注意：这需要在物理步之前生效)
+    #     root_state = self.robot.data.root_state_w[env_ids].clone()
+    #     root_state[:, :3] = new_base_pos
+    #     # 为了避免基座干涉，你可以选择不写入仿真，仅仅在RL奖励中把它当做期望坐标。
+    #     # 如果你配置了 EventTerm 负责 reset，这里可以用 self.robot.write_root_state_to_sim() 强行覆写
+    #     self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
+    #
+    #     # 4. 立即计算一次命令
+    #     self._compute_and_store_command(env_ids)
+
     def _generate_bezier_curves(self, env_ids: torch.Tensor):
         """
-        [要求: 每轮episode开始的时候生成一条贝塞尔曲线（path）]
+        [修改]: 引入“相对环境中心的虚拟画布”概念，并严格限制高度和宽度。
         """
-
         num_resets = len(env_ids)
+        # 【关键修复 1】：获取每个环境的中心原点！
+        env_origins = self._env.scene.env_origins[env_ids]
 
         # 1. 采样本轮路径总长度 (1m - 6m)
         r_len = self.cfg.ranges.path_length
         desired_lengths = torch.empty(num_resets, device=self.device).uniform_(*r_len)
 
-        # 2. 随机生成控制点 (近似长度约束)
-        # [要求: 工作空间校验，在机器人的最大臂展半径内（0.8m < R < 1.5m）]
-        p0 = torch.zeros(num_resets, 3, device=self.device)
-        p0[:, 0] = torch.empty(num_resets, device=self.device).uniform_(0.8, 1.2)  # X: 前方 0.8~1.2m
-        p0[:, 1] = torch.empty(num_resets, device=self.device).uniform_(-0.8, 0.8)  # Y: 左右 0.8m
-        p0[:, 2] = torch.empty(num_resets, device=self.device).uniform_(0.5, 1.5)  # Z: 高度 0.5~1.5m
+        # 2. 生成控制点 (严格限制在机器人正前方的“虚拟画布”内)
+        # 画布中心距离机器人基座前向 0.6~0.8m，高度 0.6~1.6m，左右 0.6m
+        def sample_canvas_points():
+            p = torch.zeros(num_resets, 3, device=self.device)
+            p[:, 0] = env_origins[:, 0] + torch.empty(num_resets, device=self.device).uniform_(0.6, 0.8)  # X: 墙面深度
+            p[:, 1] = env_origins[:, 1] + torch.empty(num_resets, device=self.device).uniform_(-0.6, 0.6)  # Y: 左右宽度
+            p[:, 2] = env_origins[:, 2] + torch.empty(num_resets, device=self.device).uniform_(0.6, 1.6)  # Z: 人手高度
+            return p
 
-        # 为了保证长度接近 desired_lengths，我们设定三个增量段，每段长度约为 L/3
+        p0 = sample_canvas_points()
+
+        # 按照长度增量生成后续点
         segment_len = (desired_lengths / 3.0).unsqueeze(1)
 
-        # 生成随机方向作为增量
-        dir1 = torch.nn.functional.normalize(torch.randn(num_resets, 3, device=self.device), dim=1)
-        dir2 = torch.nn.functional.normalize(torch.randn(num_resets, 3, device=self.device), dim=1)
-        dir3 = torch.nn.functional.normalize(torch.randn(num_resets, 3, device=self.device), dim=1)
+        dir1 = torch.randn(num_resets, 3, device=self.device)
+        dir2 = torch.randn(num_resets, 3, device=self.device)
+        dir3 = torch.randn(num_resets, 3, device=self.device)
 
-        # 限制 Z 轴方向不要太剧烈，保证都在墙面上 (限制 X 轴变化)
-        dir1[:, 0] *= 0.2;
-        dir2[:, 0] *= 0.2;
-        dir3[:, 0] *= 0.2
+        # 压扁 X 轴变化，让曲线尽量贴在“一面墙”上
+        dir1[:, 0] *= 0.1;
+        dir2[:, 0] *= 0.1;
+        dir3[:, 0] *= 0.1
         dir1 = torch.nn.functional.normalize(dir1, dim=1)
         dir2 = torch.nn.functional.normalize(dir2, dim=1)
         dir3 = torch.nn.functional.normalize(dir3, dim=1)
@@ -150,33 +287,41 @@ class HandTrackingCommand(CommandTerm):
         p2 = p1 + dir2 * segment_len
         p3 = p2 + dir3 * segment_len
 
-        # 3. 离散化贝塞尔曲线
+        # 【关键修复 2】：严格把所有点裁剪回安全范围内，防止越界导致姿态扭曲
+        def clamp_pts(pt):
+            pt[:, 0] = torch.clamp(pt[:, 0], env_origins[:, 0] + 0.4, env_origins[:, 0] + 1.0)
+            pt[:, 1] = torch.clamp(pt[:, 1], env_origins[:, 1] - 0.8, env_origins[:, 1] + 0.8)
+            pt[:, 2] = torch.clamp(pt[:, 2], env_origins[:, 2] + 0.6, env_origins[:, 2] + 1.6)
+            return pt
+
+        p1 = clamp_pts(p1)
+        p2 = clamp_pts(p2)
+        p3 = clamp_pts(p3)
+
+        # 3. 离散化 3 阶贝塞尔曲线
         t = torch.linspace(0, 1, self.num_samples, device=self.device).view(1, -1, 1)
         u = 1 - t
-        # (N, num_samples, 3)
         curve = (u ** 3) * p0.unsqueeze(1) + 3 * (u ** 2) * t * p1.unsqueeze(1) + 3 * u * (t ** 2) * p2.unsqueeze(1) + (
                     t ** 3) * p3.unsqueeze(1)
         self.path_points_w[env_ids] = curve
 
-        # 4. 计算弧长 (Arc Length) 用于后续恒速追踪
+        # 4. 计算弧长 (Arc Length)
         deltas = curve[:, 1:, :] - curve[:, :-1, :]
         dists = torch.norm(deltas, dim=-1)
-        # 累加得到每个点的弧长
         arc_lengths = torch.zeros(num_resets, self.num_samples, device=self.device)
         arc_lengths[:, 1:] = torch.cumsum(dists, dim=-1)
         self.path_arc_lengths[env_ids] = arc_lengths
 
-        # 5. 生成法向量 (假设表面法向大致指向基座，即 -X，加上微小扰动)
+        # 5. 生成法向量 (墙面法向朝向机器人本身 -X，加一点小扰动)
         base_normal = torch.tensor([-1.0, 0.0, 0.0], device=self.device).view(1, 1, 3).expand(num_resets,
                                                                                               self.num_samples, 3)
-        noise = (torch.rand_like(base_normal) - 0.5) * 0.1
+        noise = (torch.rand_like(base_normal) - 0.5) * 0.05
         self.path_normals_w[env_ids] = torch.nn.functional.normalize(base_normal + noise, dim=-1)
 
     def _resample_command(self, env_ids: Sequence[int]):
         """
-        [要求: 每次reset之后（即每个episode开始）触发]
+        [修改]: 完美基座对齐逻辑，解决“砸地”、“不看墙”和“姿态诡异”的问题。
         """
-
         num_resets = len(env_ids)
         if num_resets == 0: return
 
@@ -186,35 +331,52 @@ class HandTrackingCommand(CommandTerm):
             *self.cfg.ranges.spray_distance)
         self.current_arc_length[env_ids] = 0.0
 
-        # 2. 生成贝塞尔曲线
+        # 2. 重新生成贝塞尔曲线
         self._generate_bezier_curves(env_ids)
 
-        # 3. 瞬间传送基座 (Teleport Base) 以对齐末端
-        # 获取第一点的目标位姿
+        # 计算并存储整条轨迹 (用于画红线)
+        total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids]
+        offset_expanded = total_offset.view(-1, 1, 1)
+        self.path_ee_targets[env_ids] = (
+                self.path_points_w[env_ids] +
+                self.path_normals_w[env_ids] * offset_expanded
+        )
+
+        # 3. 完美的基座站位对齐 (Smart Base Teleport)
         start_p_surf = self.path_points_w[env_ids, 0, :]
         start_n_surf = self.path_normals_w[env_ids, 0, :]
 
-        # 考虑喷枪与喷漆距离：EE_Target = Surface + (Gun + Spray) * Normal
-        total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids]
-        start_p_ee = start_p_surf + start_n_surf * total_offset.unsqueeze(1)
+        # 【关键修复 3】：我们不直接对齐手腕，而是算出一个让手腕很舒服的站位。
+        # 假设：人喷漆时，肩膀离墙大约 0.6 米是最舒服的姿态。
+        ideal_base_pos_w = start_p_surf + start_n_surf * 0.60
 
-        # 计算当前的 EE 和 Base 的相对位置差
-        curr_ee_pos_w = self.robot.data.body_state_w[env_ids, self.ee_link_idx, :3]
-        curr_base_pos_w = self.robot.data.root_pos_w[env_ids]
+        # 提取机器人的“安全降落默认状态”（此时 Z 轴是安全的，不会砸地）
+        root_state = self.robot.data.default_root_state[env_ids].clone()
 
-        # 将 Base 平移，使得 EE 移动到 start_p_ee
-        offset = start_p_ee - curr_ee_pos_w
-        new_base_pos = curr_base_pos_w + offset
+        # 只覆盖 X 和 Y，保留默认的 Z 轴（安全高度）
+        root_state[:, 0] = ideal_base_pos_w[:, 0]
+        root_state[:, 1] = start_p_surf[:, 1]  # 身体中心对准第一个点的 Y 坐标
 
-        # 写入仿真 (注意：这需要在物理步之前生效)
-        root_state = self.robot.data.root_state_w[env_ids].clone()
-        root_state[:, :3] = new_base_pos
-        # 为了避免基座干涉，你可以选择不写入仿真，仅仅在RL奖励中把它当做期望坐标。
-        # 如果你配置了 EventTerm 负责 reset，这里可以用 self.robot.write_root_state_to_sim() 强行覆写
+        # 【关键修复 4】：强迫机器人“正脸”面对墙壁！
+        # 墙的法向是 n，我们要看墙，就是朝着 -n 的方向
+        yaw = torch.atan2(-start_n_surf[:, 1], -start_n_surf[:, 0])
+        # 将 Yaw 转为 四元数 (w, x, y, z)
+        # (Isaac Lab 的 w 在首位)
+        root_state[:, 3] = torch.cos(yaw / 2.0)
+        root_state[:, 4] = 0.0
+        root_state[:, 5] = 0.0
+        root_state[:, 6] = torch.sin(yaw / 2.0)
+
         self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
 
-        # 4. 立即计算一次命令
+        # 【关键修复 5】：清空上一局遗留的狂暴关节速度，恢复起手式
+        joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
+        joint_vel = torch.zeros_like(joint_pos)
+        self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+
+        # 4. 立即刷新命令
         self._compute_and_store_command(env_ids)
+
 
     def _update_command(self):
         """每个 Step 调用，根据速度更新进度"""
@@ -341,6 +503,18 @@ class HandTrackingCommand(CommandTerm):
         if self.cfg.debug_vis:
             # 只画第一个点作为代表
             self.target_markers.visualize(vis_points[0])
+
+            # ==================== [新增] 渲染红线 ====================
+            # 为了防止在训练(4096个环境)时显存崩溃，限制最多只画 4 个环境的线
+            # 在 Play 模式 (num_envs=1) 下，刚好画出唯一的那条线
+            vis_envs = min(self.num_envs, 4)
+
+            # 将 (vis_envs, 200, 3) 展平为 (vis_envs * 200, 3)
+            curve_points = self.path_ee_targets[:vis_envs].view(-1, 3)
+
+            # 把这 200 个红点一股脑丢给渲染器，看起来就是一条红线
+            self.path_markers.visualize(curve_points)
+            # =========================================================
 
     @property
     def command(self) -> torch.Tensor:
