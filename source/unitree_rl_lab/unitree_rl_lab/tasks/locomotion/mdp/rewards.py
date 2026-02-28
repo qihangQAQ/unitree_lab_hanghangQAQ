@@ -836,3 +836,51 @@ def ee_action_smoothness_penalty(
     # 手臂关节的索引通常是排在后面的（需要根据 G1 具体 DOF 顺序微调，这里先用全关节惩罚替代或切片）
     # 为简单起见，计算所有关节的动作抖动：
     return torch.sum(torch.square(action_diff), dim=1)
+
+
+def ee_base_face_board(env: "ManagerBasedRLEnv", asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """
+    [新增奖励] 强制基座（胸口）始终正对黑板方向。
+    假设黑板在 +X 方向，机器人的期望 Yaw 必须无限趋近于 0。
+    """
+    asset = env.scene[asset_cfg.name]
+
+    # 获取基座当前的 Yaw 角 (从已经有的 quat_to_yaw 函数计算)
+    base_yaw = quat_to_yaw(asset.data.root_quat_w)
+
+    # 我们期望它完全面朝 +X 方向（Yaw = 0）
+    # 使用 wrap_to_pi 确保角度在 -pi 到 pi 之间
+    yaw_error = torch.abs(wrap_to_pi(base_yaw))
+
+    # 呈指数级惩罚，偏差超过 0.2 弧度（约11度）就开始显著掉分
+    return torch.exp(-torch.square(yaw_error / 0.2))
+
+
+def joint_deviation_l1_exclude_right_arm(
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    [新增奖励] 惩罚非右臂关节偏离默认姿态的行为。
+    确保躯干和左臂保持稳定，同时给右臂追踪任务彻底“松绑”。
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    # 获取所有关节的偏离量
+    diff = asset.data.joint_pos - asset.data.default_joint_pos
+
+    # 获取所有关节的名称
+    joint_names = asset.joint_names
+
+    # 动态筛选非右臂关节的索引 (排除 index 13, 17, 21, 23, 25, 27, 29 相关的关节)
+    # 逻辑：只要名称里不包含 'right_shoulder', 'right_elbow', 'right_wrist' 就进行惩罚
+    exclude_keywords = ["right_shoulder", "right_elbow", "right_wrist"]
+
+    # 找到需要惩罚的关节索引
+    keep_indices = []
+    for i, name in enumerate(joint_names):
+        if not any(key in name for key in exclude_keywords):
+            keep_indices.append(i)
+
+    # 只计算这些非右臂关节的绝对误差之和
+    return torch.sum(torch.abs(diff[:, keep_indices]), dim=1)

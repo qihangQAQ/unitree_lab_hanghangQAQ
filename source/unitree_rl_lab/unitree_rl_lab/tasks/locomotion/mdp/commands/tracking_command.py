@@ -156,12 +156,35 @@ class HandTrackingCommand(CommandTerm):
         dir3 = torch.nn.functional.normalize(torch.randn(num_resets, 3, device=self.device), dim=1)
 
         # 限制 Z 轴方向不要太剧烈，保证都在墙面上 (限制 X 轴变化)
-        dir1[:, 0] *= 0.2;
-        dir2[:, 0] *= 0.2;
+        dir1[:, 0] *= 0.2
+        dir2[:, 0] *= 0.2
         dir3[:, 0] *= 0.2
         dir1 = torch.nn.functional.normalize(dir1, dim=1)
         dir2 = torch.nn.functional.normalize(dir2, dim=1)
         dir3 = torch.nn.functional.normalize(dir3, dim=1)
+
+        p1 = p0 + dir1 * segment_len
+        p2 = p1 + dir2 * segment_len
+        p3 = p2 + dir3 * segment_len
+
+        # ==================== [新增：工作空间硬约束] ====================
+        # 利用凸包性质，对所有控制点进行截断，保证整条曲线无论如何都不会超出此范围
+
+        # 限制 p1 的 X(0.8~1.2), Y(-0.8~0.8), Z(0.5~1.5)
+        p1[:, 0] = torch.clamp(p1[:, 0], min=0.8, max=1.2)
+        p1[:, 1] = torch.clamp(p1[:, 1], min=-0.8, max=0.8)
+        p1[:, 2] = torch.clamp(p1[:, 2], min=0.5, max=1.5)
+
+        # 限制 p2
+        p2[:, 0] = torch.clamp(p2[:, 0], min=0.8, max=1.2)
+        p2[:, 1] = torch.clamp(p2[:, 1], min=-0.8, max=0.8)
+        p2[:, 2] = torch.clamp(p2[:, 2], min=0.5, max=1.5)
+
+        # 限制 p3
+        p3[:, 0] = torch.clamp(p3[:, 0], min=0.8, max=1.2)
+        p3[:, 1] = torch.clamp(p3[:, 1], min=-0.8, max=0.8)
+        p3[:, 2] = torch.clamp(p3[:, 2], min=0.5, max=1.5)
+        # ===============================================================
 
         p1 = p0 + dir1 * segment_len
         p2 = p1 + dir2 * segment_len
@@ -172,20 +195,26 @@ class HandTrackingCommand(CommandTerm):
         u = 1 - t
         # (N, num_samples, 3)
         curve = (u ** 3) * p0.unsqueeze(1) + 3 * (u ** 2) * t * p1.unsqueeze(1) + 3 * u * (t ** 2) * p2.unsqueeze(1) + (
-                    t ** 3) * p3.unsqueeze(1)
+                t ** 3) * p3.unsqueeze(1)
         self.path_points_w[env_ids] = curve
 
-        # --- 新增：计算并可视化红色路径线 ---
-        # 1. 计算所有点的法向偏移 (考虑当前环境采样的喷漆距离)
-        # 注意：由于每个环境的 spray_dist 不同，这里需要 broadcast
+        # ==================== [修改一] 调整计算顺序 ====================
+        # 先生成法向量 (假设表面法向大致指向基座，即 -X，加上微小扰动)
+        base_normal = torch.tensor([-1.0, 0.0, 0.0], device=self.device).view(1, 1, 3).expand(num_resets,
+                                                                                              self.num_samples, 3)
+        noise = (torch.rand_like(base_normal) - 0.5) * 0.1
+        # [关键修复]: 先给 normals 赋值，确保它不再是全 0
+        self.path_normals_w[env_ids] = torch.nn.functional.normalize(base_normal + noise, dim=-1)
+
+        # 再计算红色路径线 (考虑当前环境采样的喷漆距离)
         total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids].view(-1, 1, 1)
 
-        # 计算末端应该经过的 200 个点的世界坐标
-        # path_ee_targets 形状: (N, 200, 3)
+        # 计算末端应该经过的 200 个点的世界坐标 (这时的法向量已经有值了，红线会正确悬空)
         ee_path = curve + self.path_normals_w[env_ids] * total_offset
         self.path_ee_targets[env_ids] = ee_path
+        # ===============================================================
 
-        # 2. 绘制红线 (使用 path_markers)
+        # 绘制红线 (使用 path_markers)
         if self.cfg.debug_vis:
             # 展平数据以符合 VisualizationMarkers 的输入要求: (N * 200, 3)
             # 只有在 reset 时更新整条线，效率更高
@@ -198,12 +227,6 @@ class HandTrackingCommand(CommandTerm):
         arc_lengths = torch.zeros(num_resets, self.num_samples, device=self.device)
         arc_lengths[:, 1:] = torch.cumsum(dists, dim=-1)
         self.path_arc_lengths[env_ids] = arc_lengths
-
-        # 5. 生成法向量 (假设表面法向大致指向基座，即 -X，加上微小扰动)
-        base_normal = torch.tensor([-1.0, 0.0, 0.0], device=self.device).view(1, 1, 3).expand(num_resets,
-                                                                                              self.num_samples, 3)
-        noise = (torch.rand_like(base_normal) - 0.5) * 0.1
-        self.path_normals_w[env_ids] = torch.nn.functional.normalize(base_normal + noise, dim=-1)
 
     def _resample_command(self, env_ids: Sequence[int]):
         """
@@ -223,28 +246,31 @@ class HandTrackingCommand(CommandTerm):
         self._generate_bezier_curves(env_ids)
 
         # 3. 瞬间传送基座 (Teleport Base) 以对齐末端
-        # 获取第一点的目标位姿
+        # 获取第一点的表面目标位姿
         start_p_surf = self.path_points_w[env_ids, 0, :]
         start_n_surf = self.path_normals_w[env_ids, 0, :]
 
-        # 考虑喷枪与喷漆距离：EE_Target = Surface + (Gun + Spray) * Normal
+        # 计算末端应该在的空间坐标： EE_Target = Surface + Normal * (Gun + Spray)
         total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids]
         start_p_ee = start_p_surf + start_n_surf * total_offset.unsqueeze(1)
 
-        # 计算当前的 EE 和 Base 的相对位置差
-        curr_ee_pos_w = self.robot.data.body_state_w[env_ids, self.ee_link_idx, :3]
-        curr_base_pos_w = self.robot.data.root_pos_w[env_ids]
+        # ==================== [修改二] 修复传送逻辑 ====================
+        # 不再读取可能处于摔倒状态的瞬时身体坐标 (body_state_w)，避免物理穿模。
+        # 改用“假定机器人处于默认站立姿态时，手臂相对于基座的固定偏置”来推算。
 
-        # 将 Base 平移，使得 EE 移动到 start_p_ee
-        offset = start_p_ee - curr_ee_pos_w
-        new_base_pos = curr_base_pos_w + offset
+        # 假设 G1 默认站立姿态时，手部在基座正前方 0.4m，高度差 0.4m (你可以根据实际模型微调这三个值)
+        # 这是一个 (3,) 的张量，表示 [X向偏置, Y向偏置, Z向偏置]
+        default_ee_offset = torch.tensor([0.4, 0.0, 0.4], device=self.device)
+
+        # 直接反推基座应该被传送到的世界坐标
+        # 基座位置 = 期望末端位置 - 默认手臂伸展长度
+        new_base_pos = start_p_ee - default_ee_offset.unsqueeze(0)
 
         # 写入仿真 (注意：这需要在物理步之前生效)
         root_state = self.robot.data.root_state_w[env_ids].clone()
         root_state[:, :3] = new_base_pos
-        # 为了避免基座干涉，你可以选择不写入仿真，仅仅在RL奖励中把它当做期望坐标。
-        # 如果你配置了 EventTerm 负责 reset，这里可以用 self.robot.write_root_state_to_sim() 强行覆写
         self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
+        # ===============================================================
 
         # 4. 立即计算一次命令
         self._compute_and_store_command(env_ids)
