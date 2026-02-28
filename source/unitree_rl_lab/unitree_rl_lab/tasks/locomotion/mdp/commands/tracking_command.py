@@ -112,6 +112,23 @@ class HandTrackingCommand(CommandTerm):
             )
         )
 
+        # ==================== [新增] 红色路径线设置 ====================
+        # 用密集的小红球来模拟红线
+        self.path_markers = VisualizationMarkers(
+            VisualizationMarkersCfg(
+                prim_path="/Visuals/Command/full_path_line",
+                markers={
+                    "sphere": sim_utils.SphereCfg(
+                        radius=0.005,  # 半径设小一点，看起来像线
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0))  # 红色
+                    ),
+                }
+            )
+        )
+        # 用来存储算上法向偏移后，末端真正的运动轨迹 (N, 200, 3)
+        self.path_ee_targets = torch.zeros(self.num_envs, self.num_samples, 3, device=self.device)
+        # ===============================================================
+
     def _generate_bezier_curves(self, env_ids: torch.Tensor):
         """
         [要求: 每轮episode开始的时候生成一条贝塞尔曲线（path）]
@@ -157,6 +174,22 @@ class HandTrackingCommand(CommandTerm):
         curve = (u ** 3) * p0.unsqueeze(1) + 3 * (u ** 2) * t * p1.unsqueeze(1) + 3 * u * (t ** 2) * p2.unsqueeze(1) + (
                     t ** 3) * p3.unsqueeze(1)
         self.path_points_w[env_ids] = curve
+
+        # --- 新增：计算并可视化红色路径线 ---
+        # 1. 计算所有点的法向偏移 (考虑当前环境采样的喷漆距离)
+        # 注意：由于每个环境的 spray_dist 不同，这里需要 broadcast
+        total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids].view(-1, 1, 1)
+
+        # 计算末端应该经过的 200 个点的世界坐标
+        # path_ee_targets 形状: (N, 200, 3)
+        ee_path = curve + self.path_normals_w[env_ids] * total_offset
+        self.path_ee_targets[env_ids] = ee_path
+
+        # 2. 绘制红线 (使用 path_markers)
+        if self.cfg.debug_vis:
+            # 展平数据以符合 VisualizationMarkers 的输入要求: (N * 200, 3)
+            # 只有在 reset 时更新整条线，效率更高
+            self.path_markers.visualize(self.path_ee_targets.view(-1, 3))
 
         # 4. 计算弧长 (Arc Length) 用于后续恒速追踪
         deltas = curve[:, 1:, :] - curve[:, :-1, :]
@@ -339,7 +372,8 @@ class HandTrackingCommand(CommandTerm):
 
         # 更新可视化
         if self.cfg.debug_vis:
-            # 只画第一个点作为代表
+            # vis_points[0] 形状为 (num_envs, 3)
+            # 每一帧都会调用，绿点会跟随进度移动
             self.target_markers.visualize(vis_points[0])
 
     @property
