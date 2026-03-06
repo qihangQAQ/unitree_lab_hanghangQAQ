@@ -793,31 +793,33 @@ def reach_rot_target(
     return 1.0 / (1.0 + torch.square(angle_error / std))
 
 
-def ee_velocity_tracking(
-        env: ManagerBasedRLEnv,
-        command_name: str,
-        asset_cfg: SceneEntityCfg,
-        ee_body_name: str,
-        std: float
-) -> torch.Tensor:
-    """
-    [任务奖励] 末端沿轨迹移动的速度跟踪。
-    """
-    command = env.command_manager.get_command(command_name)
-    # 【修复Bug】期望速度现在在第 25 维 (索引为 24)
-    desired_speed = command[:, 24]
-    if desired_speed.ndim > 1:
-        desired_speed = desired_speed.squeeze(-1)
+def ee_tangential_speed_tracking(
+    env,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_body_name: str = "right_wrist_yaw_link",
+    std: float = 0.08,
+):
+    """奖励末端沿路径切线方向的速度接近期望速度。"""
 
-    asset: Articulation = env.scene[asset_cfg.name]
-    body_idx = asset.find_bodies(ee_body_name)[0][0]
+    robot = env.scene[asset_cfg.name]
+    cmd_term = env.command_manager.get_term(command_name)
 
-    # 提取末端线速度
-    ee_lin_vel = asset.data.body_lin_vel_w[:, body_idx, :]
-    current_speed = torch.norm(ee_lin_vel, dim=-1)
+    body_id = robot.find_bodies(ee_body_name)[0][0]
 
-    speed_error = torch.abs(current_speed - desired_speed)
-    return 1.0 / (1.0 + torch.square(speed_error / std))
+    # 世界系末端线速度 -> base frame
+    ee_lin_vel_w = robot.data.body_lin_vel_w[:, body_id, :]
+    root_quat_w = robot.data.root_quat_w
+    ee_lin_vel_b = quat_rotate_inverse(root_quat_w, ee_lin_vel_w)
+
+    tangent_b = cmd_term.current_tangent_b
+    v_tan = torch.sum(ee_lin_vel_b * tangent_b, dim=-1)
+
+    # command 最后一维就是期望速度
+    v_des = cmd_term.command[:, 24]
+
+    speed_error = v_tan - v_des
+    return torch.exp(-(speed_error ** 2) / (std ** 2))
 
 
 def ee_action_smoothness_penalty(
@@ -836,3 +838,58 @@ def ee_action_smoothness_penalty(
     # 手臂关节的索引通常是排在后面的（需要根据 G1 具体 DOF 顺序微调，这里先用全关节惩罚替代或切片）
     # 为简单起见，计算所有关节的动作抖动：
     return torch.sum(torch.square(action_diff), dim=1)
+
+def base_heading_hold(
+    env,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """奖励机器人保持 reset 时的 base 朝向，减少侧身扭过去够路径。"""
+
+    robot = env.scene[asset_cfg.name]
+    cmd_term = env.command_manager.get_term(command_name)
+
+    root_quat_w = robot.data.root_quat_w  # (N, 4)
+
+    # 当前 base 前向（world xy）
+    current_forward_w = quat_apply(
+        root_quat_w,
+        torch.tensor([1.0, 0.0, 0.0], device=root_quat_w.device).repeat(root_quat_w.shape[0], 1),
+    )
+    current_forward_xy = current_forward_w[:, :2]
+    current_forward_xy = current_forward_xy / (torch.norm(current_forward_xy, dim=-1, keepdim=True) + 1e-8)
+
+    # reset 时记录的参考前向（world xy）
+    ref_forward_xy = cmd_term.base_forward_ref_w
+
+    # 点积越大，说明越接近参考朝向
+    return 0.5 * (1.0 + torch.sum(current_forward_xy * ref_forward_xy, dim=-1))
+
+
+def progress_along_path(
+    env,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_body_name: str = "right_wrist_yaw_link",
+):
+    """奖励末端沿路径切线方向正向推进。"""
+
+    robot = env.scene[asset_cfg.name]
+    cmd_term = env.command_manager.get_term(command_name)
+
+    # 末端 body id
+    body_id = robot.find_bodies(ee_body_name)[0][0]
+
+    # 世界系末端线速度 -> base frame
+    ee_lin_vel_w = robot.data.body_lin_vel_w[:, body_id, :]               # (N, 3)
+    root_quat_w = robot.data.root_quat_w                                  # (N, 4)
+    ee_lin_vel_b = quat_rotate_inverse(root_quat_w, ee_lin_vel_w)         # (N, 3)
+
+    # command term 中维护的当前路径切线（base frame）
+    tangent_b = cmd_term.current_tangent_b                                # (N, 3)
+
+    # 切向速度投影
+    v_tan = torch.sum(ee_lin_vel_b * tangent_b, dim=-1)                   # (N,)
+
+    # 只奖励正向推进
+    return torch.clamp(v_tan, min=0.0)

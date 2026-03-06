@@ -24,3 +24,7 @@ def goal_time_out(env, command_name: str = "position") -> torch.Tensor:
     # return env.time_left <= 0.0
     cmd_term = env.command_manager.get_term(command_name)
     return cmd_term.time_left <= 0.0
+
+def path_completed(env, command_name: str) -> torch.Tensor:
+    """当手部追踪命令中的路径进度走完时，返回 True 以提前终止 Episode。"""
+    return env.command_manager.get_term(command_name).is_completed
