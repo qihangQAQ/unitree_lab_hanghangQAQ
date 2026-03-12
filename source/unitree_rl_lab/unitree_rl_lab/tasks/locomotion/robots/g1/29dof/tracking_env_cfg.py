@@ -332,6 +332,20 @@ class RewardsCfg:
         params={"command_name": "hand_tracking", "std": 0.1},
     )
 
+    # 新增 -- 3. 强制迈腿奖励（不迈腿就扣分，鼓励学习 G1 的经典步态）
+    feet_gait_spray = RewTerm(
+        func=mdp.feet_gait_spray,  # 指向我们刚刚在 rewards.py 里写好的新函数
+        weight=2.0,                # 权重给足，让它明确知道不迈腿就会被严惩
+        params={
+            "period": 0.6,         # G1 的典型单次迈步周期 (0.6秒左右比较稳健)
+            "offset": [0.0, 0.5],  # 双足机器人的灵魂：左腿相位 0，右腿落后半圈 (0.5)
+            # 这里复用你之前配置好的 contact_forces 传感器和脚部 body 名字
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"), 
+            "command_name": "hand_tracking", 
+            "move_speed_thresh": 0.02,  # 阈值：当 XY 期望速度大于 2cm/s 时才要求迈步
+        },
+    )
+
 
 
     alive = RewTerm(func=mdp.is_alive, weight=0.15)
