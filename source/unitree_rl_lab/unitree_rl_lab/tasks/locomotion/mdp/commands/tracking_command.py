@@ -55,8 +55,26 @@ def compute_target_quat_from_normal(normals: torch.Tensor, device: str) -> torch
     target_rz = torch.cross(target_rx, target_ry, dim=-1)
 
     rot_mat = torch.stack([target_rx, target_ry, target_rz], dim=-1)
-    return math_utils.matrix_to_quat(rot_mat)
+    return matrix_to_quat(rot_mat)
 
+
+def matrix_to_quat(matrix: torch.Tensor) -> torch.Tensor:
+    """将旋转矩阵转换为四元数 (w, x, y, z)"""
+    m00, m11, m22 = matrix[..., 0, 0], matrix[..., 1, 1], matrix[..., 2, 2]
+    
+    w = 0.5 * torch.sqrt(torch.clamp(1.0 + m00 + m11 + m22, min=0.0))
+    x = 0.5 * torch.sqrt(torch.clamp(1.0 + m00 - m11 - m22, min=0.0))
+    y = 0.5 * torch.sqrt(torch.clamp(1.0 - m00 + m11 - m22, min=0.0))
+    z = 0.5 * torch.sqrt(torch.clamp(1.0 - m00 - m11 + m22, min=0.0))
+    
+    # 依靠 copysign 恢复正确的正负号，避免万向节死锁和除零错误
+    x = torch.copysign(x, matrix[..., 2, 1] - matrix[..., 1, 2])
+    y = torch.copysign(y, matrix[..., 0, 2] - matrix[..., 2, 0])
+    z = torch.copysign(z, matrix[..., 1, 0] - matrix[..., 0, 1])
+    
+    return torch.stack([w, x, y, z], dim=-1)
+
+    
 
 # ================= 核心类 =================
 
@@ -141,7 +159,7 @@ class HandTrackingCommand(CommandTerm):
 
     def _resample_command(self, env_ids: Sequence[int]):
         """
-        每次 Episode Reset 触发：抽取轨迹 -> 截断 -> 基座瞬移 -> 姿态重置
+        每次 Episode Reset 触发：抽取轨迹 -> 归零 -> 旋转(法向对准机器人) -> 平移到机器人正前方
         """
         num_resets = len(env_ids)
         if num_resets == 0: return
@@ -173,57 +191,58 @@ class HandTrackingCommand(CommandTerm):
             self.env_path_normals[env_idx, :num_pts] = self.db_normals[db_idx, start_idx:end_idx]
             self.env_path_max_s[env_idx] = final_len
 
-        # 3. 采样喷漆速度和距离
+        # ================= 核心重构：把路径稳稳生成在机器人面前 =================
+        # 1. 获取轨迹在数据集中的绝对起点和初始法向
+        p0_orig = self.env_path_points[env_ids_tensor, 0, :].clone()
+        n0_orig = self.env_path_normals[env_ids_tensor, 0, :].clone()
+
+        # 2. 计算让墙面严格朝向机器人 (-X方向, 即 [-1, 0, 0]) 所需的水平旋转角 (Yaw)
+        yaw_orig = torch.atan2(n0_orig[:, 1], n0_orig[:, 0])
+        yaw_target = torch.full_like(yaw_orig, torch.pi) # 目标角度是 pi
+        yaw_diff = yaw_target - yaw_orig
+
+        # 构建只绕 Z 轴水平旋转的四元数
+        rot_quat = torch.zeros(num_resets, 4, device=self.device)
+        rot_quat[:, 0] = torch.cos(yaw_diff / 2.0)
+        rot_quat[:, 3] = torch.sin(yaw_diff / 2.0)
+        rot_quat_expanded = rot_quat.unsqueeze(1).expand(-1, self.max_pts, -1)
+
+        # 3. 几何变换三步曲：归零 -> 旋转 -> 平移
+        
+        # [步骤 A]: 归零 (抽出轨迹的绝对坐标，消除投石机甩飞 Bug)
+        self.env_path_points[env_ids_tensor] -= p0_orig.unsqueeze(1)
+        
+        # [步骤 B]: 旋转 (让整条路径跟着转，保证墙面的法向永远正对机器人)
+        self.env_path_points[env_ids_tensor] = math_utils.quat_apply(rot_quat_expanded, self.env_path_points[env_ids_tensor])
+        self.env_path_normals[env_ids_tensor] = math_utils.quat_apply(rot_quat_expanded, self.env_path_normals[env_ids_tensor])
+
+        # [步骤 C]: 平移到机器人正前方
+        root_pos_w = self.robot.data.root_pos_w[env_ids_tensor].clone()
+        target_p0 = torch.zeros_like(p0_orig)
+        
+        # X 轴放到机器人正前方 (例如 default_ee_local_pos 的 0.4m)
+        target_p0[:, 0] = root_pos_w[:, 0] + self.cfg.default_ee_local_pos[0]
+        # Y 轴对齐机器人，并加上偏置 (例如 default_ee_local_pos 的 -0.2m)
+        target_p0[:, 1] = root_pos_w[:, 1] + self.cfg.default_ee_local_pos[1]
+        # 【灵魂操作】：Z 轴坚决使用真实数据集的绝对高度，这样机器人才会学下蹲或踮脚！
+        target_p0[:, 2] = p0_orig[:, 2]
+
+        # 最终写入平移
+        self.env_path_points[env_ids_tensor] += target_p0.unsqueeze(1)
+        # =========================================================================
+
+        # 4. 采样喷漆速度和距离
         self.env_speeds[env_ids_tensor] = torch.empty(num_resets, device=self.device).uniform_(*self.cfg.ranges.velocity)
         self.env_spray_dists[env_ids_tensor] = torch.empty(num_resets, device=self.device).uniform_(*self.cfg.ranges.spray_distance)
         self.current_arc_length[env_ids_tensor] = 0.0
         self.is_completed[env_ids_tensor] = False
 
-        # ================= 核心：行业标准基座瞬移逻辑 =================
-        
-        # 4.1 获取轨迹第一点的 6D 信息
-        start_p_surf = self.env_path_points[env_ids_tensor, 0, :]
-        start_n_surf = self.env_path_normals[env_ids_tensor, 0, :]
-        
-        # 4.2 计算末端执行器 (EE) 应该在的世界绝对位置
-        total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids_tensor]
-        start_p_ee = start_p_surf + start_n_surf * total_offset.unsqueeze(1)
-        
-        # 4.3 设定基座的朝向 (让机器人的正面 X 轴正对墙面)
-        target_base_quat = compute_target_quat_from_normal(start_n_surf, self.device)
+        # 5. 记录墙面参考前向 (用于抑制机器人侧身走)
+        # 因为我们已经把法向强行旋转到了 -X，且你的 cfg 保证了机器人永远面朝 +X (yaw=0)
+        # 所以机器人的理想前向就死死绑定在世界坐标系的 +X [1.0, 0.0]
+        self.base_forward_ref_w[env_ids_tensor] = torch.tensor([1.0, 0.0], device=self.device).repeat(num_resets, 1)
 
-        # ===== 新增：记录 reset 时 base 前向（world xy） =====
-        base_forward_w = math_utils.quat_apply(
-            target_base_quat,
-            torch.tensor([1.0, 0.0, 0.0], device=self.device).repeat(num_resets, 1),
-        )
-        base_forward_xy = base_forward_w[:, :2]
-        base_forward_xy = base_forward_xy / (torch.norm(base_forward_xy, dim=-1, keepdim=True) + 1e-8)
-        self.base_forward_ref_w[env_ids_tensor] = base_forward_xy
-
-        # 4.4 反推基座位置
-        # 读取 cfg 中设定的：当机器人处于待机姿态时，右手相对于基座的本地坐标系偏移量
-        local_ee_offset = torch.tensor(self.cfg.default_ee_local_pos, device=self.device).repeat(num_resets, 1)
-        
-        # 把这个本地偏移，利用刚才算出的基座朝向，旋转到世界坐标系下
-        world_ee_offset = math_utils.quat_apply(target_base_quat, local_ee_offset)
-        
-        # 基座位置 = EE目标位置 - 旋转后的偏移
-        target_base_pos = start_p_ee - world_ee_offset
-
-        # 4.5 将基座瞬移写入物理引擎
-        root_state = self.robot.data.default_root_state[env_ids_tensor].clone()
-        root_state[:, :3] = target_base_pos
-        root_state[:, 3:7] = target_base_quat
-        root_state[:, 7:] = 0.0 # 瞬间静止
-        self.robot.write_root_state_to_sim(root_state, env_ids=env_ids_tensor)
-
-        # 4.6 强制重置所有关节到待机姿态
-        default_joint_pos = self.robot.data.default_joint_pos[env_ids_tensor].clone()
-        default_joint_vel = self.robot.data.default_joint_vel[env_ids_tensor].clone()
-        self.robot.write_joint_state_to_sim(default_joint_pos, default_joint_vel, env_ids=env_ids_tensor)
-
-        # 5. 计算初始命令
+        # 6. 计算初始命令
         self._compute_and_store_command(env_ids_tensor)
 
     def _update_command(self):

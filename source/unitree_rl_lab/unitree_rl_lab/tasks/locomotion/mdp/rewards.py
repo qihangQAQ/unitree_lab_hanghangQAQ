@@ -5,9 +5,10 @@ import math
 from typing import TYPE_CHECKING
 
 try:
-    from isaaclab.utils.math import quat_apply_inverse
+    from isaaclab.utils.math import quat_apply_inverse, quat_apply
 except ImportError:
     from isaaclab.utils.math import quat_rotate_inverse as quat_apply_inverse
+    from isaaclab.utils.math import quat_rotate as quat_apply
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
@@ -810,7 +811,7 @@ def ee_tangential_speed_tracking(
     # 世界系末端线速度 -> base frame
     ee_lin_vel_w = robot.data.body_lin_vel_w[:, body_id, :]
     root_quat_w = robot.data.root_quat_w
-    ee_lin_vel_b = quat_rotate_inverse(root_quat_w, ee_lin_vel_w)
+    ee_lin_vel_b = quat_apply_inverse(root_quat_w, ee_lin_vel_w)
 
     tangent_b = cmd_term.current_tangent_b
     v_tan = torch.sum(ee_lin_vel_b * tangent_b, dim=-1)
@@ -883,7 +884,7 @@ def progress_along_path(
     # 世界系末端线速度 -> base frame
     ee_lin_vel_w = robot.data.body_lin_vel_w[:, body_id, :]               # (N, 3)
     root_quat_w = robot.data.root_quat_w                                  # (N, 4)
-    ee_lin_vel_b = quat_rotate_inverse(root_quat_w, ee_lin_vel_w)         # (N, 3)
+    ee_lin_vel_b = quat_apply_inverse(root_quat_w, ee_lin_vel_w)         # (N, 3)
 
     # command term 中维护的当前路径切线（base frame）
     tangent_b = cmd_term.current_tangent_b                                # (N, 3)
