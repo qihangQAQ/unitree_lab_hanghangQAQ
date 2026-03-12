@@ -319,16 +319,18 @@ class RewardsCfg:
         },
     )
 
-    # # 7. 沿路径推进（新增）
-    # progress_along_path = RewTerm(
-    #     func=mdp.progress_along_path,
-    #     weight=2.0,
-    #     params={
-    #         "command_name": "hand_tracking",
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         "ee_body_name": "right_wrist_yaw_link",
-    #     },
-    # )
+    # 新增 -- 1. 引导底盘靠近投影点
+    base_xy_pos_tracking = RewTerm(
+        func=mdp.base_xy_pos_tracking,
+        weight=2.0,
+        params={"command_name": "hand_tracking", "std": 0.15},
+    )
+    # 新增 -- 2. 引导底盘速度（侧滑步，竖直立定）
+    base_xy_velocity_tracking = RewTerm(
+        func=mdp.base_xy_velocity_tracking,
+        weight=3.0,
+        params={"command_name": "hand_tracking", "std": 0.1},
+    )
 
 
 
@@ -431,6 +433,15 @@ class CurriculumCfg:
     hand_tracking_levels = CurrTerm(
         func=mdp.hand_tracking_levels,
         params={"reward_term_name": "ee_pos_tracking_tight"}
+    )
+
+    # 【新增】动态开启手臂奖励的课程
+    arm_reward_levels = CurrTerm(
+        func=mdp.arm_tracking_reward_curriculum,
+        params={
+            "trigger_reward_name": "base_xy_pos_tracking", # 只有底盘走得好，才解锁手臂
+            "step_size": 0.05 # 经过 20 次优异表现才完全解锁 (越平滑越不容易掉分)
+        }
     )
 
 

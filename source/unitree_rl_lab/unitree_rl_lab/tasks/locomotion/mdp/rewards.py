@@ -766,7 +766,11 @@ def ee_reach_pos_target_soft(
     command = env.command_manager.get_command(command_name)
     pos_error_vec = command[:, 0:3]  # 0cm处的位置误差
     distance = torch.norm(pos_error_vec, dim=-1)
-    return 1.0 / (1.0 + torch.square(distance / std))
+    base_reward = 1.0 / (1.0 + torch.square(distance / std))
+    
+    # 【核心修改】读取环境的动态放开比例
+    scale = getattr(env, "arm_reward_scale", 0.0)
+    return base_reward * scale
 
 
 def ee_reach_pos_target_tight(
@@ -779,7 +783,10 @@ def ee_reach_pos_target_tight(
     command = env.command_manager.get_command(command_name)
     pos_error_vec = command[:, 0:3]
     distance = torch.norm(pos_error_vec, dim=-1)
-    return torch.exp(-(distance / std) ** 2)
+    base_reward = torch.exp(-(distance / std) ** 2)
+    
+    scale = getattr(env, "arm_reward_scale", 0.0)
+    return base_reward * scale
 
 
 def reach_rot_target(
@@ -791,7 +798,10 @@ def reach_rot_target(
     command = env.command_manager.get_command(command_name)
     rot_error_vec = command[:, 3:6]  # 0cm处的姿态误差
     angle_error = torch.norm(rot_error_vec, dim=-1)
-    return 1.0 / (1.0 + torch.square(angle_error / std))
+    base_reward = 1.0 / (1.0 + torch.square(angle_error / std))
+    
+    scale = getattr(env, "arm_reward_scale", 0.0)
+    return base_reward * scale
 
 
 def ee_tangential_speed_tracking(
@@ -820,7 +830,14 @@ def ee_tangential_speed_tracking(
     v_des = cmd_term.command[:, 24]
 
     speed_error = v_tan - v_des
-    return torch.exp(-(speed_error ** 2) / (std ** 2))
+    # 1. 算出原本的满分 base_reward
+    base_reward = torch.exp(-(speed_error ** 2) / (std ** 2))
+    
+    # 2. 从 env 中安全地获取动态开启比例（没有的话默认就是 0.0）
+    scale = getattr(env, "arm_reward_scale", 0.0)
+    
+    # 3. 返回缩放后的奖励
+    return base_reward * scale
 
 
 def ee_action_smoothness_penalty(
@@ -894,3 +911,123 @@ def progress_along_path(
 
     # 只奖励正向推进
     return torch.clamp(v_tan, min=0.0)
+
+# ==============================================================================
+# Curriculum Stage 1: Base Locomotion Tracking Rewards (Decoupled from Arm)
+# ==============================================================================
+
+def base_xy_pos_tracking(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_link_name: str = "right_wrist_yaw_link",
+    default_ee_local_pos: tuple[float, float, float] = (0.4, -0.2, 0.2),
+    std: float = 0.15,
+) -> torch.Tensor:
+    """
+    [第一阶段] 底盘 XY 平面位置追踪。
+    逻辑：从末端误差反推路径目标点，期望底盘保持默认的 XY 偏置距离。
+    魔法：完全忽略 Z 轴误差！目标点再怎么上下飞，底盘只管在地上平移，不会试图上下乱跳。
+    """
+    robot: Articulation = env.scene[asset_cfg.name]
+    cmd_term = env.command_manager.get_term(command_name)
+
+    # 1. 拿到末端(EE)当前的世界坐标
+    ee_link_idx = robot.find_bodies(ee_link_name)[0][0]
+    ee_pos_w = robot.data.body_pos_w[:, ee_link_idx, :3]
+    root_quat_w = robot.data.root_quat_w
+
+    # 2. 从指令的 0cm 处观测值反推目标点的世界坐标
+    # command[:, 0:3] 是 base 系下的末端位置误差
+    pos_err_b = cmd_term.command[:, 0:3]
+    pos_err_w = quat_apply(root_quat_w, pos_err_b)
+    target_p_w = ee_pos_w + pos_err_w  # 路径上的实际参考点
+
+    # 3. 计算底盘的期望位置 (目标点减去待机姿态的偏置)
+    # 把偏置从 Base 系转到 World 系
+    offset_b = torch.tensor(default_ee_local_pos, device=robot.device).repeat(robot.num_envs, 1)
+    offset_w = quat_apply(root_quat_w, offset_b)
+    
+    desired_base_pos_w = target_p_w - offset_w
+
+    # 4. 只算 XY 平面的距离误差
+    current_base_pos_w = robot.data.root_pos_w
+    xy_error = desired_base_pos_w[:, :2] - current_base_pos_w[:, :2]
+    distance = torch.norm(xy_error, dim=-1)
+
+    return torch.exp(-(distance / std) ** 2)
+
+
+def base_xy_velocity_tracking(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float = 0.1,
+) -> torch.Tensor:
+    """
+    [第一阶段] 底盘速度追踪 (解决“没有显式速度指令”的痛点)。
+    逻辑：利用路径切线在 Base 系 XY 平面的投影，推导底盘期望线速度。
+    魔法：如果是竖直喷漆，切线只有 Z 方向有值，XY 投影为 0，这会直接逼迫机器人“原地站立不动”！
+    """
+    robot: Articulation = env.scene[asset_cfg.name]
+    cmd_term = env.command_manager.get_term(command_name)
+
+    # 获取路径切线方向 (Base系下, N x 3) 和 标量期望速度 (第24维)
+    tangent_b = cmd_term.current_tangent_b
+    v_des_scalar = cmd_term.command[:, 24]
+
+    # 期望的 Base 系 XY 线速度
+    # 如果此时在侧向走墙壁，tangent_b[:, 1] 很大，机器人就会去踩侧滑步
+    desired_lin_vel_b_xy = tangent_b[:, :2] * v_des_scalar.unsqueeze(1)
+
+    # 当前真实的 Base 系 XY 线速度
+    current_lin_vel_b_xy = robot.data.root_lin_vel_b[:, :2]
+
+    vel_error = torch.norm(desired_lin_vel_b_xy - current_lin_vel_b_xy, dim=-1)
+
+    return torch.exp(-(vel_error / std) ** 2)
+
+# --------- 核心修改：新增基于路径切线的专属步态奖励 ---------
+def feet_gait_spray(
+    env: ManagerBasedRLEnv,
+    period: float,
+    offset: list[float],
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 0.5,
+    command_name: str = "hand_tracking",
+    move_speed_thresh: float = 0.02,
+) -> torch.Tensor:
+    """
+    专门针对喷漆任务优化的步态奖励。
+    利用路径切线判断底盘是否需要移动，只有在需要平移时才强制要求交替迈腿。
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    is_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0
+
+    global_phase = ((env.episode_length_buf * env.step_dt) % period / period).unsqueeze(1)
+    phases = []
+    for offset_ in offset:
+        phase = (global_phase + offset_) % 1.0
+        phases.append(phase)
+    leg_phase = torch.cat(phases, dim=-1)
+
+    reward = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    for i in range(len(sensor_cfg.body_ids)):
+        is_stance = leg_phase[:, i] < threshold
+        reward += ~(is_stance ^ is_contact[:, i])
+
+    # ===== 核心修改：基于底盘期望速度的掩码 =====
+    cmd_term = env.command_manager.get_term(command_name)
+
+    # 1. 获取路径在底盘 XY 平面的投影速度
+    tangent_b = cmd_term.current_tangent_b
+    v_des_scalar = cmd_term.command[:, 24]
+    desired_lin_vel_b_xy = tangent_b[:, :2] * v_des_scalar.unsqueeze(1)
+
+    # 2. 计算底盘期望的平面移动速率
+    desired_base_speed = torch.norm(desired_lin_vel_b_xy, dim=-1)
+    
+    # 3. 如果速度大于阈值，说明在横扫墙面，强制迈腿；如果小于阈值（竖直喷漆），掩码为 0，允许双脚站立
+    move_mask = desired_base_speed > move_speed_thresh
+    
+    return reward * move_mask.float()

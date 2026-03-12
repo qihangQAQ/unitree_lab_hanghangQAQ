@@ -198,3 +198,38 @@ def hand_tracking_levels(
 
     # 4. 返回当前课程“难度指标”（用于日志）
     return torch.tensor(ranges.velocity[1], device=env.device)
+
+# ----------------  根据底盘追踪奖励的表现来放开手臂奖励的比例，而不是单纯调整命令范围。 ----------------
+def arm_tracking_reward_curriculum(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    trigger_reward_name: str = "base_xy_pos_tracking",
+    step_size: float = 0.05,
+) -> torch.Tensor:
+    """
+    [动态奖励课程]
+    根据底盘位置追踪的表现，动态放开手臂追踪奖励，并解锁手臂。
+    """
+    # 初始化全局缩放因子 (0.0 表示只训练底盘，完全关闭手臂奖励)
+    if not hasattr(env, "arm_reward_scale"):
+        env.arm_reward_scale = 0.0  
+
+    # 拿到触发条件的奖励分（底盘XY移动）
+    reward_term = env.reward_manager.get_term_cfg(trigger_reward_name)
+    mean_reward = (
+        torch.mean(env.reward_manager._episode_sums[trigger_reward_name][env_ids])
+        / env.max_episode_length_s
+    )
+
+    # 每个 episode 结束时评估一次
+    if env.common_step_counter % env.max_episode_length == 0:
+        # 如果底盘已经能稳定拿到 80% 以上的分数
+        if mean_reward > reward_term.weight * 0.8:
+            # 缓慢提升手臂奖励的比例 (每次加 0.05，分 20 个 Episode 平滑开启，防止网络崩溃)
+            env.arm_reward_scale = min(1.0, env.arm_reward_scale + step_size)
+            
+            # 打印日志让你在终端能看到进度
+            if env.arm_reward_scale > 0.0 and env.arm_reward_scale < 1.0:
+                print(f"[Curriculum] 底盘追踪达标！当前手臂奖励放开比例: {env.arm_reward_scale*100:.1f}%")
+
+    return torch.tensor(env.arm_reward_scale, device=env.device)
