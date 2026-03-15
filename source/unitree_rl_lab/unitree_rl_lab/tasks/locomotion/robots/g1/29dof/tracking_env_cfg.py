@@ -141,68 +141,27 @@ class EventCfg:
         mode="reset",
         params={
             "position_range": (1.0, 1.0),
-            "velocity_range": (-1.0, 1.0),
+            "velocity_range": (0.0, 0.0),
         },
     )
 
     # interval
-    push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
-        mode="interval",
-        interval_range_s=(5.0, 5.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    )
+    # push_robot = EventTerm(
+    #     func=mdp.push_by_setting_velocity,
+    #     mode="interval",
+    #     interval_range_s=(5.0, 5.0),
+    #     params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+    # )
 
 
 @configclass
-# class CommandsCfg:
-#     """Command specifications for the MDP."""
-
-#     base_velocity = mdp.UniformLevelVelocityCommandCfg(
-#         asset_name="robot",
-#         resampling_time_range=(10.0, 10.0),
-#         rel_standing_envs=0.02,
-#         rel_heading_envs=1.0,
-#         heading_command=False,
-#         debug_vis=True,
-#         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-#             lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
-#         ),
-#         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-#             lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.2, 0.2)
-#         ),
-#     )
 class CommandsCfg:
-    """Command specifications for the MDP."""
+    """Command terms for the MDP."""
     hand_tracking = mdp.HandTrackingCommandCfg(
-
         asset_name="robot",
-        # 设为极大值，强制仅在 episode reset 时才生成新曲线
-        resampling_time_range=(1.0e9, 1.0e9),
-
-        # G1右手末端 right_wrist_yaw_link
-        ee_link_idx=29,
-
-        step_dt=0.02,
-
-        # 喷枪长度15cm
-        gun_length=0.15,
-        debug_vis=True,
-
-        # 【修改这里】
-        ranges=mdp.HandTrackingCommandCfg.Ranges(
-            velocity=(0.10, 0.10),  # <--- 上下限都设为 0.10，相当于固定 10cm/s
-            spray_distance=(0.05, 0.10),  # 喷涂距离如果你也想固定，可以改为 (0.05, 0.05)
-            path_length=(1.0, 6.0),
-        ),
-
-        # 这个 limit_ranges 是为你以后的“课程设计”预留的满级目标
-        limit_ranges=mdp.HandTrackingCommandCfg.Ranges(
-            velocity=(0.10, 0.40),
-            spray_distance=(0.05, 0.15),
-            path_length=(3.0, 6.0),
-        )
+        ee_link_idx=29,  # 【注意】请确保 29 是你 G1 机器人右腕/末端真实的 link index
     )
+
 
 
 @configclass
@@ -283,71 +242,69 @@ class ObservationsCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # -- task
-    # track_lin_vel_xy = RewTerm(
-    #     func=mdp.track_lin_vel_xy_yaw_frame_exp,
-    #     weight=1.0,
-    #     params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
-    # )
-    # track_ang_vel_z = RewTerm(
-    #     func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
-    # )
 
-    # =================== 喷漆任务核心奖励 ===================
-    # 1. 软位置追踪 (容忍度较大 10cm)，引导致使手臂靠近曲线
+    # =================== 1. 手臂追踪核心任务 (你总结的 4个追踪 + 1个平滑) ===================
+    # (1) 软位置追踪
     ee_pos_tracking_soft = RewTerm(
         func=mdp.ee_reach_pos_target_soft,
         weight=2.0,
         params={"command_name": "hand_tracking", "std": 0.10},
     )
-
-    # 2. 硬位置追踪 (容忍度极小 2cm)，逼迫高精度贴合
+    # (2) 硬位置追踪
     ee_pos_tracking_tight = RewTerm(
         func=mdp.ee_reach_pos_target_tight,
         weight=3.0,
         params={"command_name": "hand_tracking", "std": 0.02},
     )
-
-    # 3. 姿态追踪 (喷枪严格对准墙面)
+    # (3) 姿态追踪
     ee_rot_tracking = RewTerm(
         func=mdp.reach_rot_target,
         weight=2.5,
         params={"command_name": "hand_tracking", "std": 0.15},
     )
-
-    # 4. 速度追踪 (保持匀速移动)
-    ee_vel_tracking = RewTerm(
+    # (4) 速度追踪 (注意：这里对应你 rewards.py 里的函数名 ee_velocity_tracking)
+    ee_tangential_speed_tracking = RewTerm(
         func=mdp.ee_velocity_tracking,
         weight=2.0,
         params={
             "command_name": "hand_tracking",
             "asset_cfg": SceneEntityCfg("robot"),
-            "ee_body_name": "right_wrist_yaw_link",  # G1真实末端
-            "std": 0.10
+            "ee_body_name": "right_wrist_yaw_link",  # 确保这是真实的连杆名
+            "std": 0.08,
         },
     )
-
-    # 5. 动作平滑度惩罚 (喷漆必须丝滑)
+    # (5) 动作平滑度惩罚
     action_smoothness = RewTerm(
         func=mdp.ee_action_smoothness_penalty,
         weight=-0.05,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
-    alive = RewTerm(func=mdp.is_alive, weight=0.15)
+    # =================== 2. 底盘移动与特定步态 ===================
+    # 特定侧滑步态 (你要求的步态)
+    feet_gait_spray = RewTerm(
+        func=mdp.feet_gait_spray,  # 请确保你已经把这个函数加到了 rewards.py 中
+        weight=2.0,
+        params={
+            "period": 0.6,
+            "offset": [0.0, 0.5],
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+            "command_name": "hand_tracking",
+            "move_speed_thresh": 0.02,
+        },
+    )
 
-    # -- base
-    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
-    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05)
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
-    energy = RewTerm(func=mdp.energy, weight=-2e-5)
+    # =================== 3. 前期单纯的任务追踪  ===================
+    base_xy_pos_tracking = RewTerm(func=mdp.base_xy_pos_tracking, weight=2.0,
+                                   params={"command_name": "hand_tracking", "std": 0.15})
+    base_xy_velocity_tracking = RewTerm(func=mdp.base_xy_velocity_tracking, weight=3.0,
+                                        params={"command_name": "hand_tracking", "std": 0.1})
+    base_heading_hold = RewTerm(func=mdp.base_heading_hold, weight=1.5, params={"command_name": "hand_tracking"})
 
+    # =================== 4. 手臂锁  ===================
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.1,
+        weight=-0.02,  # 【核心修改】极其微弱的惩罚。允许自然摆臂，只惩罚极其夸张的乱甩
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
@@ -359,6 +316,33 @@ class RewardsCfg:
             )
         },
     )
+
+    # =================== 基础生存与姿态惩罚 ===================
+    alive = RewTerm(func=mdp.is_alive, weight=0.15)
+
+    # -- base
+    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
+    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05)
+    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
+    energy = RewTerm(func=mdp.energy, weight=-2e-5)
+
+    # joint_deviation_arms = RewTerm(
+    #     func=mdp.joint_deviation_l1,
+    #     weight=-0.1,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg(
+    #             "robot",
+    #             joint_names=[
+    #                 ".*_shoulder_.*_joint",
+    #                 ".*_elbow_joint",
+    #                 ".*_wrist_.*",
+    #             ],
+    #         )
+    #     },
+    # )
     joint_deviation_waists = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-1,
@@ -378,7 +362,7 @@ class RewardsCfg:
     )
 
     # -- robot
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
     base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
 
     # -- feet
@@ -428,8 +412,13 @@ class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.2})
+    base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.5})
     bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
+    # 新增：路径走完就结束
+    path_completed = DoneTerm(
+        func=mdp.path_completed,
+        params={"command_name": "hand_tracking"},
+    )
 
 
 @configclass
@@ -442,6 +431,16 @@ class CurriculumCfg:
         func=mdp.hand_tracking_levels,  # 指向刚才写的新函数
         params={"reward_term_name": "ee_pos_tracking_tight"}
     )
+
+    # 【新增】动态开启手臂奖励的课程
+    arm_reward_levels = CurrTerm(
+        func=mdp.arm_tracking_reward_curriculum,
+        params={
+            "trigger_reward_name": "base_xy_pos_tracking", # 只有底盘走得好，才解锁手臂
+            "step_size": 0.05 # 经过 20 次优异表现才完全解锁 (越平滑越不容易掉分)
+        }
+    )
+
 
 
 @configclass
