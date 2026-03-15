@@ -160,6 +160,7 @@ class CommandsCfg:
     hand_tracking = mdp.HandTrackingCommandCfg(
         asset_name="robot",
         ee_link_idx=29,  # 【注意】请确保 29 是你 G1 机器人右腕/末端真实的 link index
+        resampling_time_range=(1.0e9, 1.0e9),  # 【关键补丁】：设为极大值，确保命令永不中途超时刷新
     )
 
 

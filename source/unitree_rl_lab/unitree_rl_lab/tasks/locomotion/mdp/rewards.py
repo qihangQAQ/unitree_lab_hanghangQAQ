@@ -917,7 +917,7 @@ def base_xy_pos_tracking(
 
     # 3. 计算底盘的期望位置 (目标点减去待机姿态的偏置)
     # 把偏置从 Base 系转到 World 系
-    offset_b = torch.tensor(default_ee_local_pos, device=robot.device).repeat(robot.num_envs, 1)
+    offset_b = torch.tensor(default_ee_local_pos, device=robot.device).repeat(env.num_envs, 1)
     offset_w = quat_apply(root_quat_w, offset_b)
 
     desired_base_pos_w = target_p_w - offset_w

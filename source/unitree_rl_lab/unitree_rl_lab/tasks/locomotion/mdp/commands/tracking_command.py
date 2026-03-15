@@ -153,6 +153,9 @@ class HandTrackingCommand(CommandTerm):
         # [补丁] 提供给 base_heading_hold 奖励用的基准朝向
         self.base_forward_ref_w = torch.zeros(self.num_envs, 2, device=self.device)
 
+        # 【关键修复】：加上对 current_tangent_b 的初始化
+        self.current_tangent_b = torch.zeros(self.num_envs, 3, device=self.device)
+
         # visualization
         self.target_markers = VisualizationMarkers(
             VisualizationMarkersCfg(
@@ -554,9 +557,6 @@ class HandTrackingCommand(CommandTerm):
         # 转到 Base 系下并存储
         self.current_tangent_b[env_ids] = math_utils.quat_apply_inverse(root_quat_w, tangent_w)
 
-        if self.cfg.debug_vis:
-            vis_points = torch.cat(vis_points, dim=0)  # 4N x 3
-            self.target_markers.visualize(vis_points)
 
     @property
     def command(self) -> torch.Tensor:
