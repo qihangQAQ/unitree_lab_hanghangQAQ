@@ -400,7 +400,30 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 32
-        self.scene.terrain.terrain_generator.num_rows = 2
-        self.scene.terrain.terrain_generator.num_cols = 10
-        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+
+        # 1. 设置只跑一个环境，方便观察
+        self.scene.num_envs = 1
+
+        # 2. 延长 Episode 时间至 120s
+        self.episode_length_s = 120.0
+
+        # 3. 设定任务速度范围 (固定在 0.3m/s 到 0.7m/s)
+        # 禁用重采样（设置一个巨大的重采样时间），确保中途不换命令
+        self.commands.base_velocity.resampling_time_range = (1.0e9, 1.0e9)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.7, 0.7)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+
+        # 4. 关掉随机推动和其他扰动 Event
+        # 将不需要的 event 设为 None 即可禁用
+        self.events.push_robot = None
+        self.events.base_external_force_torque = None
+        # 如果不需要启动时的随机摩擦力或质量增加，也可以关掉
+        # self.events.physics_material = None
+        # self.events.add_base_mass = None
+
+        # 5. 终止条件修改
+        # 如果想让它“跑完即关闭”，通常在脚本调用层处理，
+        # 但这里我们可以确保它不会因为超时以外的原因轻易 reset
+        self.terminations.base_height = None  # 关掉掉落重置（可选）
+        self.terminations.bad_orientation = None  # 关掉翻倒重置（可选）
