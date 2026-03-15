@@ -407,6 +407,40 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         # 2. 延长 Episode 时间至 120s
         self.episode_length_s = 120.0
 
+        # --- 地形设定 (带有详细参数注释) ---
+        self.scene.terrain.terrain_generator = terrain_gen.TerrainGeneratorCfg(
+            size=(5.0, 5.0),  # 楼梯的size,长 * 宽
+            border_width=20.0,  # 外围地面的宽度
+            num_rows=1,  # Play 模式只生成 1 行 1 列 (单一地形)
+            num_cols=1,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            use_cache=False,
+            sub_terrains={
+                "stairs": terrain_gen.HfPyramidStairsTerrainCfg(
+                    proportion=1.0,
+                    step_width=0.3,
+                    step_height_range=(0.1, 0.1),  # 固定 10cm 的台阶高度
+                    platform_width=1.5
+                ),
+                # 跑道 B：粗糙不规则地面 (50% 概率生成)
+                "rough": terrain_gen.HfRandomUniformTerrainCfg(
+                    proportion=0.5,
+                    noise_range=(0.02, 0.05),  # 地面起伏在 2cm 到 5cm 之间
+                    noise_step=0.02
+                ),
+            },
+        )
+        self.scene.terrain.max_init_terrain_level = 0
+
+        # ---  出生位置调整 (关键步骤)  ---
+
+        self.events.reset_base.params["pose_range"] = {
+            "x": (-5.0, -5.0),  # 固定在中心点后方 3 米处出生
+            "y": (0.0, 0.0),  # y 轴居中
+            "yaw": (0.0, 0.0)  # 面朝正前方 (+x 方向，即面向台阶)
+        }
+
         # 3. 设定任务速度范围 (固定在 0.3m/s 到 0.7m/s)
         # 禁用重采样（设置一个巨大的重采样时间），确保中途不换命令
         self.commands.base_velocity.resampling_time_range = (1.0e9, 1.0e9)
