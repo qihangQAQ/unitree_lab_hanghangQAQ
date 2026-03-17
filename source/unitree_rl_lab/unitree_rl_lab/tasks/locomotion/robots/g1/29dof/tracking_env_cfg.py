@@ -488,29 +488,50 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 
 @configclass
 class RobotPlayEnvCfg(RobotEnvCfg):
+    """测试（play）环境配置，继承自训练配置，并覆盖适合推理的设置。"""
+
     def __post_init__(self):
         super().__post_init__()
-        super().__post_init__()
 
-        # 1. 减少环境数量：Play 模式不需要 4096 个环境，50 个足够看清动作细节了
-        self.scene.num_envs = 1
+        # ========== 1. 环境数量与仿真 ==========
+        self.scene.num_envs = 1                     # 单环境，便于观察
+        self.episode_length_s = 60.0                 # 保持与训练一致
 
-        # 2. 地形设置：稍微调整一下规模
-        self.scene.terrain.terrain_generator.num_rows = 5
-        self.scene.terrain.terrain_generator.num_cols = 5
+        # 地形生成器若存在则调整为小尺寸，加快加载
+        if self.scene.terrain.terrain_generator is not None:
+            self.scene.terrain.terrain_generator.num_rows = 5
+            self.scene.terrain.terrain_generator.num_cols = 5
 
-        # 3. 【关键修正】设置命令难度为“最终目标”
-        # 之前的 base_velocity 已经删了，这里要改成 hand_tracking
-        # 将 ranges 直接设为 limit_ranges，让机器人直接挑战最难的指标 (速度 0.4, 距离 0.15 等)
-        self.commands.hand_tracking.ranges = self.commands.hand_tracking.limit_ranges
+        # ========== 2. 命令：直接使用最高难度（limit_ranges） ==========
+        cmd = self.commands.hand_tracking
+        # 将当前 ranges 替换为 limit_ranges 实例（包含速度、喷涂距离、路径长度等）
+        cmd.ranges = cmd.limit_ranges
+        # 开启可视化，便于观察路径和目标点（可选）
+        cmd.debug_vis = True
 
-        # 4. 禁用课程学习 (Curriculum)
-        # Play 阶段不需要难度递增，我们直接看“满级”表现
+        # ========== 3. 禁用课程学习 ==========
         self.curriculum.hand_tracking_levels = None
-        # 如果你有地形课程也可以在这里关掉
+        self.curriculum.arm_reward_levels = None   # 如果有手臂奖励课程，也禁用
+        # 如果还有其他课程项（如 terrain_levels），也设为 None
         # self.curriculum.terrain_levels = None
 
-        # 5. (可选) 禁用观测噪声
-        # 如果你想看“完美传感器”下的表现，可以取消注释下面这行。
-        # 但为了测试鲁棒性，通常建议保留噪声。
+        # ========== 4. 固定随机化事件 ==========
+        # 移除 startup 随机化（摩擦、质量）
+        self.events.physics_material = None
+        self.events.add_base_mass = None
+
+        # 固定 reset 时的位姿（取消随机偏移）
+        if self.events.reset_base is not None:
+            self.events.reset_base.params["pose_range"] = {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "yaw": (0.0, 0.0),
+            }
+        if self.events.reset_robot_joints is not None:
+            self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)  # 1.0 倍默认关节角度
+
+        # ========== 5. （可选）关闭观测噪声 ==========
         # self.observations.policy.enable_corruption = False
+
+        # ========== 6. 终止条件（与训练一致，保留 path_completed） ==========
+        # terminations 中的 path_completed 已启用，无需修改

@@ -568,7 +568,7 @@ class HandTrackingCommandCfg(CommandTermCfg):
     class LimitRanges:
         # 后续课程设计可逐步拉到这里
         velocity: tuple[float, float] = (0.10, 0.40)
-        spray_distance: tuple[float, float] = (0.05, 0.12)
+        spray_distance: tuple[float, float] = (0.05, 0.10)
         path_length: tuple[float, float] = (5.0, 8.0)
 
     ranges: Ranges = Ranges()
