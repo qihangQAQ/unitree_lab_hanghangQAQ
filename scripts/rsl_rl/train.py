@@ -92,6 +92,9 @@ import shutil
 import torch
 from datetime import datetime
 
+# ==== 新增：注入 NP3O 类 ====
+import unitree_rl_lab.rsl_rl_ext  # 必须在导入 rsl_rl 之前
+
 from rsl_rl.runners import OnPolicyRunner  # TODO: Consider printing the experiment name in the terminal.
 from rsl_rl.runners import NP3ORunner
 import isaaclab_tasks  # noqa: F401
