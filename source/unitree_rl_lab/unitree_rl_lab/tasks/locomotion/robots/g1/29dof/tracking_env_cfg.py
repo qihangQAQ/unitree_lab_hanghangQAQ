@@ -158,9 +158,51 @@ class EventCfg:
 class CommandsCfg:
     """Command terms for the MDP."""
     hand_tracking = mdp.HandTrackingCommandCfg(
+        # 基础连杆与刷新设置
         asset_name="robot",
-        ee_link_idx=29,  # 【注意】请确保 29 是你 G1 机器人右腕/末端真实的 link index
+        ee_link_idx=29,                        # 【注意】请确保 29 是你 G1 机器人右腕/末端真实的 link index
         resampling_time_range=(1.0e9, 1.0e9),  # 【关键补丁】：设为极大值，确保命令永不中途超时刷新
+        
+        # 物理与控制周期
+        step_dt=0.02,                          # 环境的物理控制周期，0.02 表示 50Hz 控制频率
+        gun_length=0.15,                       # 喷枪的物理长度 (米)
+        point_spacing=0.01,                    # 轨迹点的离散采样间距。0.01 表示每隔 1cm 存一个坐标点
+        
+        # 观测空间(Observations)前瞻点设置
+        num_lookahead_points=4,                # 观测空间中的前瞻点数量
+        lookahead_spacing=0.05,                # 前瞻点之间的弧长间隔。0.05 表示未来 0cm(当前), 5cm, 10cm, 15cm 处的四个目标
+        
+        # ==========================
+        # 拼接复合轨迹专有配置
+        # ==========================
+        num_chunks=5,                                 # 每条路径被分成的形态段数 (直线/波浪/圆环/方波)
+        amplitude_range=(0.15, 0.40),                 # 波浪/圆环的振幅范围
+        frequency_range=(8.0, 15.0),                  # 形状的频率范围
+        x_noise_scale=0.0012,                         # 墙面不平整度 (X 轴随机游走噪声)
+        normal_noise_scale=0.02,                      # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
+        
+        # 起点与工作空间控制
+        start_x_forward=0.50,                         # 起点控制：第一点固定在机器人 root 坐标系正前方 50cm 处
+        start_y_offset_range=(-0.1, 0.1),             # 起点在左右 (Y 轴) 方向上的随机偏移范围，增加初始位置的多样性 (-10cm 到 10cm)
+        start_z_offset_range=(0.2, 0.4),              # 起点高度相对于机器人 root 高度的偏移范围 (往上偏 20cm 到 40cm，大概是胸前位置)
+        workspace_z=(0.60, 1.40),                     # 绝对安全工作空间 (Z 轴高度)。生成的轨迹在任何情况下都会被强制截断在这个高度范围内
+        
+        # 调试可视化
+        debug_vis=False,                              # 【注意】训练时强烈建议设为 False 以节省算力，Play 测试时可改为 True
+        
+        # ==========================
+        # 难度课程范围设置 (Curriculum)
+        # ==========================
+        ranges=mdp.HandTrackingCommandCfg.Ranges(
+            velocity=(0.10, 0.10),                    # 期望的喷涂移动速度 (10cm/s)，起步阶段固定速度，方便机器人学习稳定步伐
+            spray_distance=(0.05, 0.10),              # 喷枪头距离墙面的期望空隙距离 (5cm 到 10cm 随机)
+            path_length=(1.0, 3.0),                   # 整条轨迹的长度范围 (1m 到 3m)。前期走得短，更容易拿高分，建立信心
+        ),
+        limit_ranges=mdp.HandTrackingCommandCfg.LimitRanges(
+            velocity=(0.10, 0.30),                    # 随着课程解锁，最终机器人要能处理高达 30cm/s 的高速喷涂任务
+            spray_distance=(0.05, 0.15),              # 喷涂距离允许在 5cm 到 15cm 之间随机变化
+            path_length=(5.0, 8.0),                   # 最终机器人需要能一口气走完 5m 到 8m 长的超长复合墙面
+        )
     )
 
 
@@ -300,29 +342,38 @@ class RewardsCfg:
                                    params={"command_name": "hand_tracking", "std": 0.15})
     base_xy_velocity_tracking = RewTerm(func=mdp.base_xy_velocity_tracking, weight=3.0,
                                         params={"command_name": "hand_tracking", "std": 0.1})
-    base_heading_hold = RewTerm(func=mdp.base_heading_hold, weight=1.5, params={"command_name": "hand_tracking"})
+    base_face_surface_normal = RewTerm(
+        func=mdp.base_face_surface_normal, 
+        weight=2.0, 
+        params={"command_name": "hand_tracking", "std": 0.2}
+    )
 
     # =================== 4. 手臂锁  ===================
-    joint_deviation_arms = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.02,  # 【核心修改】极其微弱的惩罚。允许自然摆臂，只惩罚极其夸张的乱甩
+    joint_deviation_arms_dynamic = RewTerm(
+        func=mdp.joint_deviation_arms_curriculum,
+        weight=-0.08,  # 给一个中等惩罚，足够让一阶段锁住双手，又不至于破坏其他动作
         params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    ".*_shoulder_.*_joint",
-                    ".*_elbow_joint",
-                    ".*_wrist_.*",
-                ],
-            )
+            "asset_cfg": SceneEntityCfg("robot"),
+            "left_arm_joints": [
+                "left_shoulder_.*_joint",
+                "left_elbow_joint",
+                "left_wrist_.*",
+            ],
+            "right_arm_joints": [
+                "right_shoulder_.*_joint",
+                "right_elbow_joint",
+                "right_wrist_.*",
+            ],
         },
     )
+    # 【新增】引入动态下蹲追踪，权重给到 1.5
+    base_z_pos_tracking = RewTerm(func=mdp.base_z_pos_tracking, weight=1.5, params={"command_name": "hand_tracking", "std": 0.1})
 
     # =================== 基础生存与姿态惩罚 ===================
     alive = RewTerm(func=mdp.is_alive, weight=0.15)
 
     # -- base
-    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5)
     base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
@@ -364,7 +415,7 @@ class RewardsCfg:
 
     # -- robot
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
+    base_height = RewTerm(func=mdp.base_height_l2, weight=-2.0, params={"target_height": 0.78})
 
     # -- feet
     # gait = RewTerm(
@@ -488,7 +539,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 
 @configclass
 class RobotPlayEnvCfg(RobotEnvCfg):
-    """测试（play）环境配置，继承自训练配置，并覆盖适合推理的设置。"""
+    """测试(play)环境配置，继承自训练配置，并覆盖适合推理的设置。"""
 
     def __post_init__(self):
         super().__post_init__()
