@@ -861,19 +861,22 @@ def ee_action_smoothness_penalty(
     # 为简单起见，计算所有关节的动作抖动：
     return torch.sum(torch.square(action_diff), dim=1)
 
-def base_heading_hold(
-    env,
+# 新增：底盘面向奖励（让底盘始终面向墙面，适应轨迹面的凹凸起伏）
+def base_face_surface_normal(
+    env: ManagerBasedRLEnv,
     command_name: str,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-):
-    """奖励机器人保持 reset 时的 base 朝向，减少侧身扭过去够路径。"""
-
+    std: float = 0.2, 
+) -> torch.Tensor:
+    """
+    奖励机器人的正前方（Base X 轴）始终对准墙面法向量的反方向。
+    抛弃了 reset 时的死板朝向，完全动态适应轨迹面的凹凸起伏。
+    """
     robot = env.scene[asset_cfg.name]
     cmd_term = env.command_manager.get_term(command_name)
 
-    root_quat_w = robot.data.root_quat_w  # (N, 4)
-
-    # 当前 base 前向（world xy）
+    # 1. 当前底盘的正前方（世界系 XY 平面投影）
+    root_quat_w = robot.data.root_quat_w
     current_forward_w = quat_apply(
         root_quat_w,
         torch.tensor([1.0, 0.0, 0.0], device=root_quat_w.device).repeat(root_quat_w.shape[0], 1),
@@ -881,11 +884,17 @@ def base_heading_hold(
     current_forward_xy = current_forward_w[:, :2]
     current_forward_xy = current_forward_xy / (torch.norm(current_forward_xy, dim=-1, keepdim=True) + 1e-8)
 
-    # reset 时记录的参考前向（world xy）
-    ref_forward_xy = cmd_term.base_forward_ref_w
+    # 2. 从 Command 中提取当前轨迹点的法向量，取反方向即为“期望面对的墙面方向”
+    target_forward_w = -cmd_term.current_surf_n_w[:, :2] 
+    target_forward_xy = target_forward_w / (torch.norm(target_forward_w, dim=-1, keepdim=True) + 1e-8)
 
-    # 点积越大，说明越接近参考朝向
-    return 0.5 * (1.0 + torch.sum(current_forward_xy * ref_forward_xy, dim=-1))
+    # 3. 计算夹角并给予指数惩罚
+    cos_theta = torch.sum(current_forward_xy * target_forward_xy, dim=-1)
+    cos_theta = torch.clamp(cos_theta, -1.0, 1.0)
+    angle_error = torch.acos(cos_theta)
+
+    # std=0.2 大约容忍 11 度的偏差，超过分数骤降，逼迫底盘死死盯住墙面
+    return torch.exp(-(angle_error / std) ** 2)
 
 
 def base_xy_pos_tracking(
@@ -1004,3 +1013,81 @@ def feet_gait_spray(
     move_mask = desired_base_speed > move_speed_thresh
 
     return reward * move_mask.float()
+
+
+# 新增 -- 鼓励机器人根据末端位置误差自动调整底盘高度，尤其是在需要下蹲的时候（例如目标点在较低位置时）。通过限制期望高度在合理范围内，防止机器人试图做出不切实际的动作。
+def base_z_pos_tracking(
+        env: ManagerBasedRLEnv,
+        command_name: str,
+        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+        ee_link_name: str = "right_wrist_yaw_link",
+        default_ee_local_pos: tuple[float, float, float] = (0.4, -0.2, 0.2),
+        std: float = 0.1,
+        z_limits: tuple[float, float] = (0.55, 0.80), # G1 正常站立约 0.78m，极限下蹲大概在 0.55m 左右
+) -> torch.Tensor:
+    """
+    [第一阶段] 底盘 Z 轴高度追踪 (鼓励下蹲)。
+    逻辑：根据轨迹目标点的 Z 轴高度，反推底盘应该处于的合理高度。
+    使用 z_limits 限制期望高度，防止目标点太低/太高导致机器人试图做出违背物理极限的动作。
+    """
+    robot: Articulation = env.scene[asset_cfg.name]
+    cmd_term = env.command_manager.get_term(command_name)
+
+    # 1. 拿到末端(EE)当前的世界坐标
+    ee_link_idx = robot.find_bodies(ee_link_name)[0][0]
+    ee_pos_w = robot.data.body_pos_w[:, ee_link_idx, :3]
+    root_quat_w = robot.data.root_quat_w
+
+    # 2. 从指令反推目标点的世界坐标
+    pos_err_b = cmd_term.command[:, 0:3]
+    pos_err_w = quat_apply(root_quat_w, pos_err_b)
+    target_p_w = ee_pos_w + pos_err_w  
+
+    # 3. 计算底盘的期望 Z 高度 (目标高度 - 默认偏置的 Z)
+    offset_b = torch.tensor(default_ee_local_pos, device=robot.device).repeat(env.num_envs, 1)
+    offset_w = quat_apply(root_quat_w, offset_b)
+
+    desired_base_z = target_p_w[:, 2] - offset_w[:, 2]
+    
+    # 【核心安全机制】：把期望的下蹲高度限制在物理合理的范围内
+    # 如果目标点在地下，机器人也不会试图趴在地上（terminations里有限制 <0.5m 会直接死）
+    desired_base_z = torch.clamp(desired_base_z, min=z_limits[0], max=z_limits[1])
+
+    # 4. 计算当前真实底盘高度与期望高度的误差
+    current_base_z = robot.data.root_pos_w[:, 2]
+    z_error = torch.abs(desired_base_z - current_base_z)
+
+    return torch.exp(-(z_error / std) ** 2)
+
+def joint_deviation_arms_curriculum(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    left_arm_joints: list[str],
+    right_arm_joints: list[str],
+) -> torch.Tensor:
+    """
+    一阶段：左右手全部受罚，老老实实贴在身侧。
+    二阶段：随着右臂任务奖励的放开(arm_reward_scale)，右臂的惩罚等比例削减至 0，而左臂依然受罚。
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    # 获取左右手关节索引
+    left_indices, _ = asset.find_joints(left_arm_joints)
+    right_indices, _ = asset.find_joints(right_arm_joints)
+
+    # 计算所有关节偏离默认姿态的绝对误差
+    diff = torch.abs(asset.data.joint_pos - asset.data.default_joint_pos)
+
+    # 左右手各自的偏差总和
+    left_dev = torch.sum(diff[:, left_indices], dim=1)
+    right_dev = torch.sum(diff[:, right_indices], dim=1)
+
+    # 获取当前的课程进度 (0.0 到 1.0)
+    default_scale = 1.0 if getattr(env.cfg.curriculum, "arm_reward_levels", None) is None else 0.0
+    scale = getattr(env, "arm_reward_scale", default_scale)
+
+    # 右臂惩罚权重倒转：进度为 0 时惩罚是 1倍；进度为 1(完全解锁)时，惩罚是 0。
+    right_penalty_weight = 1.0 - scale
+
+    # 返回动态组合的惩罚值
+    return left_dev + right_dev * right_penalty_weight

@@ -206,7 +206,7 @@ def arm_tracking_reward_curriculum(
         env_ids,
         trigger_reward_name: str = "base_xy_pos_tracking",
         step_size: float = 0.05,
-        trigger_threshold: float = 0.50,   # 新增：固定绝对阈值
+        trigger_threshold: float = 0.80,   # 新增：固定绝对阈值
 ):
     if not hasattr(env, "arm_reward_scale"):
         env.arm_reward_scale = 0.0
