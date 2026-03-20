@@ -11,14 +11,16 @@ class RslRlNp3oActorCriticCfg(RslRlPpoActorCriticCfg):
     """
     NP3O policy 配置：
     - 继承 PPO policy cfg
-    - 额外补充 cost critics 的网络结构
+    - 额外补充多头成本价值函数网络结构
     """
     # 新增：policy 类名（必须与代码一致）
     class_name: str = "ActorCriticNP3O"  # 你的最新类名
 
-    # 新增超参数：cost_critic_hidden_dims -- cost critic 隐层结构（需写入 cfg）
-    # 说明：NP3OActorCritic 新增了 cost_critic_1/2，这里控制它们的 MLP 结构
+    # 新增超参数：cost_critic_hidden_dims -- 多头成本价值函数的共享隐藏层结构（需写入 cfg）
     cost_critic_hidden_dims: list[int] = [512, 256, 128]
+
+    # 新增超参数：num_costs -- 成本约束数量，必须与 algorithm.num_costs 一致
+    num_costs: int = 2
 
 
 @configclass

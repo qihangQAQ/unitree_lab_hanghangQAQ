@@ -12,9 +12,8 @@ class ActorCriticNP3O(ActorCritic):
     在 PPO 的 ActorCritic 基础上：
     1) 保留原有 actor（策略网络）
     2) 保留原有 reward critic（V_r）
-    3) 新增两个 cost critic：
-        - cost_critic_1：关节限位约束（joint limit cost）
-        - cost_critic_2：碰撞约束（collision cost）
+    3) 新增多头成本价值函数：
+        - cost_critic：输出所有成本的价值估计（默认2个：关节限位、碰撞）
     """
 
     def __init__(
@@ -66,31 +65,24 @@ class ActorCriticNP3O(ActorCritic):
             num_critic_obs += obs[obs_group].shape[-1]
 
         # ------------------------------------------------------------
-        # 3. 新增：Cost Critic 网络
+        # 3. 新增：多头成本价值函数
         # ------------------------------------------------------------
 
-        # 新增：关节限位 cost critic
-        # 对应约束：joint position limits
-        # 估计 V_c1(s) = E[∑ γ^t * cost_joint_limit_t]
-        self.cost_critic_1 = MLP(
-            num_critic_obs,
-            1,
-            cost_critic_hidden_dims,
+        # 从 kwargs 中获取成本数量，默认为 2（保持向后兼容）
+        num_costs = kwargs.get('num_costs', 2)
+        self.num_costs = num_costs
+
+        # 多头成本价值函数：共享隐藏层，输出所有成本的价值估计
+        # 数学：V_c(s) = [V_c1(s), V_c2(s), ..., V_cC(s)]，其中 C = num_costs
+        self.cost_critic = MLP(
+            num_critic_obs,           # 输入维度
+            num_costs,                # 输出维度 = 成本约束数量
+            cost_critic_hidden_dims,  # 共享隐藏层结构
             activation,
         )
 
-        # 新增：碰撞 cost critic
-        # 对应约束：robot-obstacle / robot-body collision
-        # 估计 V_c2(s) = E[∑ γ^t * cost_collision_t]
-        self.cost_critic_2 = MLP(
-            num_critic_obs,
-            1,
-            cost_critic_hidden_dims,
-            activation,
-        )
-
-        print("[NP3O] Cost Critic 1 (joint limit):", self.cost_critic_1)
-        print("[NP3O] Cost Critic 2 (collision):", self.cost_critic_2)
+        print(f"[NP3O] 多头成本价值函数: 输入={num_critic_obs}, 输出={num_costs}, 隐藏层={cost_critic_hidden_dims}")
+        print("[NP3O] Cost Critic:", self.cost_critic)
 
     # ======================================================================
     # 新增接口函数（供 NP3O 算法调用）
@@ -101,31 +93,41 @@ class ActorCriticNP3O(ActorCritic):
     def evaluate_reward(self, obs):
         return super().evaluate(obs)
 
-    # 新增：同时评估两个 cost value
+    # 新增：同时评估所有 cost value
     # 作用：
-    #   给定 critic observation，返回：
-    #   - V_c1(s)：关节限位 cost 的 value
-    #   - V_c2(s)：碰撞 cost 的 value
+    #   给定 critic observation，返回所有成本的价值估计
+    #   输出形状: (batch_size, num_costs)，其中 num_costs = 2（默认：关节限位、碰撞）
     def evaluate_costs(self, obs):
 
         critic_obs = self.get_critic_obs(obs)
         critic_obs = self.critic_obs_normalizer(critic_obs)
 
-        vc1 = self.cost_critic_1(critic_obs)
-        vc2 = self.cost_critic_2(critic_obs)
+        # 单次前向传播，获取所有成本的价值估计
+        # 形状: (batch_size, num_costs)
+        all_costs = self.cost_critic(critic_obs)
 
-        return torch.cat([vc1, vc2], dim=-1)  # (N, 2)
+        return all_costs
 
-    # 新增：单独评估「关节限位」cost value
+    # 新增：单独评估「关节限位」cost value（成本索引 0）
     # 作用：
     #   在算法中构造 cost-1 的 GAE / value loss / 日志时调用
     def evaluate_cost_1(self, obs):
-        vc1, _ = self.evaluate_costs(obs)
-        return vc1
+        all_costs = self.evaluate_costs(obs)
+        # 提取第一个成本，保持二维形状 (N, 1)
+        return all_costs[:, 0:1]
 
-    # 新增：单独评估「碰撞」cost value
+    # 新增：单独评估「碰撞」cost value（成本索引 1）
     # 作用：
     #   在算法中构造 cost-2 的 GAE / value loss / 日志时调用
     def evaluate_cost_2(self, obs):
-        _, vc2 = self.evaluate_costs(obs)
-        return vc2
+        all_costs = self.evaluate_costs(obs)
+        # 提取第二个成本，保持二维形状 (N, 1)
+        return all_costs[:, 1:2]
+
+    # 新增：通用方法，获取第 i 个成本的价值估计
+    # 作用：
+    #   用于扩展更多成本约束时的通用接口
+    def evaluate_cost_i(self, obs, i: int):
+        """获取第 i 个成本的价值估计（0-based 索引）"""
+        all_costs = self.evaluate_costs(obs)
+        return all_costs[:, i:i+1]  # 保持二维形状 (N, 1)
