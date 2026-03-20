@@ -40,15 +40,27 @@ class NP3O:
         normalize_advantage_per_mini_batch=False,
 
         # ==================== 新增：NP3O 超参数 ====================
-        # 新增超参数：num_costs -- 约束数量num_cost（你这里=2：关节限位、碰撞；需写入 cfg）
+        # 新增超参数：num_costs -- 约束数量 C（你这里=2：关节限位、碰撞；需写入 cfg）
+        # 数学公式：C = 约束数量，对应论文中的约束数量
+        # 参数含义：C 表示有多少个不同的成本约束需要同时优化
+        # 变量对应：self.num_costs = C
         num_costs: int = 2,
 
-        # 新增超参数：cost_gamma -- cost 的成本折扣因子γ_c（可与 reward gamma 相同；需写入 cfg）
+        # 新增超参数：cost_gamma -- 成本折扣因子 γ_c（可与 reward gamma 相同；需写入 cfg）
+        # 数学公式：γ_c ∈ [0,1)，用于计算成本回报 R_c^i = ∑_{t=0}^{∞} γ_c^t c_t^i
+        # 参数含义：折扣未来成本的权重，γ_c越小越重视近期成本
+        # 变量对应：self.cost_gamma = γ_c
         cost_gamma: float = 0.99,
-        # 新增超参数：cost_lam -- cost GAE 的 lambda（需写入 cfg）
+        # 新增超参数：cost_lam -- 成本 GAE 的 λ_c 参数（需写入 cfg）
+        # 数学公式：λ_c ∈ [0,1]，用于计算成本优势 A_c^i = GAE(γ_c, λ_c)
+        # 参数含义：权衡偏差与方差的参数，λ_c=1 为高偏差低方差（MC估计），λ_c=0 为低偏差高方差（TD估计）
+        # 变量对应：self.cost_lam = λ_c
         cost_lam: float = 0.95,
 
-        # 新增超参数：eps_cost -- 每个约束的约束阈值 ε_i (ε_i在论文中常设为0)）
+        # 新增超参数：eps_cost -- 每个约束的阈值 ε_i（ε_i在论文中常设为0）
+        # 数学公式：ε_i ∈ ℝ，约束 i 的可接受成本上限，论文公式(2)：J^C_i(π) ≤ ε_i
+        # 参数含义：约束 i 的最大允许折扣累计成本，ε_i=0 表示零成本约束
+        # 变量对应：self.eps_cost[i] = ε_i
         eps_cost=None,
 
         # 新增超参数：kappa_cost -- 每个约束的约束惩罚权重κ_i (控制每个约束的惩罚强度)
@@ -114,7 +126,7 @@ class NP3O:
 
         # storage
         self.storage: RolloutStorage = None  # type: ignore
-        self.transition = RolloutStorage.Transition()
+        self.transition = NP3ORolloutStorage.Transition()
 
         # PPO parameters（沿用）
         self.clip_param = clip_param
@@ -202,18 +214,29 @@ class NP3O:
             self.intrinsic_rewards = self.rnd.get_intrinsic_reward(obs)
             self.transition.rewards += self.intrinsic_rewards
 
-        if "time_outs" in extras:
-            self.transition.rewards += self.gamma * torch.squeeze(
-                self.transition.values * extras["time_outs"].unsqueeze(1).to(self.device), 1
-            )
-
         # ==================== 新增：记录 env 输出的 costs ====================
         # 新增：costs -- env 每 step 输出的 costs（shape: [num_envs, num_costs]）
-        # 注意：cost 不做 reward bootstrap（timeout 处理一般只用于 reward 回报）
         if "costs" not in extras:
             raise KeyError("NP3O requires extras['costs'] from env (shape: [num_envs, num_costs]).")
         self.transition.costs = extras["costs"].to(self.device)
         # =====================================================================
+
+        # ==================== 修正：Reward 与 Cost 的同步 Bootstrap ====================
+        if "time_outs" in extras:
+            # 1. Reward Bootstrap (你原有的代码)
+            self.transition.rewards += self.gamma * torch.squeeze(
+                self.transition.values * extras["time_outs"].unsqueeze(1).to(self.device), 1
+            )
+
+            # 2. Cost Bootstrap (修正新增)
+            # 提取 timeout 掩码，shape: (num_envs, 1)
+            time_outs_mask = extras["time_outs"].unsqueeze(1).to(self.device).float()
+
+            # transition.cost_values 包含通过 Cost Critic 评估的 V_c(s)
+            # shape 广播：(N, C) * (N, 1) -> (N, C)
+            # 注意：cost bootstrap 在环境成本基础上添加
+            self.transition.costs += self.cost_gamma * self.transition.cost_values * time_outs_mask
+        # ===============================================================================
 
         self.storage.add_transitions(self.transition)
         self.transition.clear()
@@ -221,6 +244,10 @@ class NP3O:
 
     # ==================== 新增：同时计算 reward returns 和 cost returns ====================
     # 新增：compute_returns -- reward 用 PPO 的 compute_returns，cost 用 compute_cost_returns
+    # 公式：对于每个成本i，计算成本回报（cost return）和成本优势（cost advantage）
+    #  成本回报：R_c^i = ∑_{l=0}^{∞} (γ_c)^l c_{t+l}^i，其中γ_c = cost_gamma
+    #  成本优势：A_c^i = GAE(γ_c, λ_c) 使用成本TD误差 δ_c^i = c_t^i + γ_c * V_c^i(s_{t+1}) - V_c^i(s_t)
+    #  具体实现在 NP3ORolloutStorage.compute_cost_returns 中
     def compute_returns(self, obs):
         last_values = self.policy.evaluate(obs).detach()
         self.storage.compute_returns(
@@ -243,6 +270,22 @@ class NP3O:
     # ===============================================================================
 
     def update(self):  # noqa: C901
+        """
+        NP3O 更新步骤，包括：
+        1. 采样 mini-batch（包含 cost 相关信息）
+        2. 计算 PPO surrogate loss（奖励优势）
+        3. 计算 reward value loss（奖励值函数）
+        4. 对每个成本约束 i：
+            a. 估计约束违反 violation_i = max(J^C_i(π) - ε_i, 0)，其中 J^C_i(π) ≈ mean(cost_i) 在本 batch 中
+            b. 计算成本替代损失 cost_surrogate_loss_i，使用成本优势 A^C_i（最小化成本）
+            c. 计算成本惩罚 penalty_i = κ_i * violation_i * cost_surrogate_loss_i
+            d. 计算成本值函数损失 cost_value_loss_i（拟合成本回报）
+        5. 总损失 = surrogate_loss + value_loss_coef * value_loss
+                 + cost_value_loss_coef * total_cost_value_loss
+                 + total_cost_penalty
+                 - entropy_coef * entropy
+        6. 反向传播并更新策略参数
+        """
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_entropy = 0
@@ -411,9 +454,27 @@ class NP3O:
                 cost_value_pred = torch.cat([cv for cv in cost_value_pred], dim=-1)  # (B,C)
 
             for i in range(self.num_costs):
+                """
+                对每个成本约束 i 独立计算：
+                1. 约束违反 violation_i = max(J^C_i(π) - ε_i, 0)
+                   其中 J^C_i(π) 是成本 i 的期望折扣累计成本，用本 batch 的 mean(cost_i) 近似
+                2. 成本替代损失 cost_surrogate_loss_i = max(cost_sur, cost_sur_clipped).mean()
+                   其中 cost_sur = A^C_i * ratio, cost_sur_clipped = A^C_i * clip(ratio, 1-ε, 1+ε)
+                   （与 PPO 类似，但优势 A^C_i 是成本优势，目标是最小化成本）
+                3. 惩罚项 penalty_i = κ_i * violation_i * cost_surrogate_loss_i
+                4. 成本值函数损失 cost_value_loss_i，拟合成本回报 R^C_i
+                """
                 # ---- violation estimate ----
-                Jc_i = costs_batch[:, i].mean()
+                # Jc_i：step中第i个cost的违规次数
+                Jc_i = cost_returns_batch[:, i].mean()
+                # violation_i：max(0,Jc_i - self.eps_cost[i]) 
+                # self.eps_cost[i]：设定的约束违规阈值ϵi
                 violation_i = torch.relu(Jc_i - self.eps_cost[i])
+
+                # ---- 2. 获取归一化补偿项 ----
+                # 提取 storage 中保存的统计量
+                mu_c_i = self.storage.cost_advantages_mean[0, 0, i]
+                sigma_c_i = self.storage.cost_advantages_std[0, 0, i]
 
                 # ---- cost surrogate loss (minimize cost) ----
                 cost_adv_i = cost_advantages_batch[:, i]
@@ -421,13 +482,23 @@ class NP3O:
                 cost_sur_clipped = torch.squeeze(cost_adv_i) * torch.clamp(
                     ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
                 )
-                cost_surrogate_loss_i = torch.max(cost_sur, cost_sur_clipped).mean()
+                # cost_surrogate_loss_i = torch.max(cost_sur, cost_sur_clipped).mean()
+                L_C_i_CLIP_N = torch.max(cost_sur, cost_sur_clipped).mean()
 
+                # ---- 4. 构建加法偏移违规目标 L_C_i^VIOL_N ----
+                # 对应公式中的常数偏移项：[(1 - gamma) * (J_C_i - eps_i) + mu_c_i] / sigma_c_i
+                offset_i = ((1.0 - self.cost_gamma) * (Jc_i - self.eps_cost[i]) + mu_c_i) / sigma_c_i
+                L_C_i_VIOL_N = L_C_i_CLIP_N + offset_i
+                
                 # ---- penalty ----
-                penalty_i = self.kappa_cost[i] * violation_i * cost_surrogate_loss_i
+                # self.kappa_cost[i]：第 i 个约束的惩罚权重系数，来源于cfg中的kappa_cost
+                # cost_surrogate_loss_i：基于 PPO 裁剪逻辑计算出的 Cost 代理损失
+                penalty_i = self.kappa_cost[i] * torch.relu(L_C_i_VIOL_N)
                 total_cost_penalty = total_cost_penalty + penalty_i
 
                 # ---- cost value loss ----
+                # 拟合成本值函数 V^C_i(s) 到成本回报 R^C_i，其中 R^C_i = A^C_i + V^C_i(s)
+                # 使用 clipped value loss 防止值函数更新过大（与 PPO reward critic 类似）
                 # target_cost_values_batch 是 rollout 时的旧 Vc(s)（用于 clipping）
                 pred_i = cost_value_pred[:, i : i + 1]
                 ret_i = cost_returns_batch[:, i : i + 1]

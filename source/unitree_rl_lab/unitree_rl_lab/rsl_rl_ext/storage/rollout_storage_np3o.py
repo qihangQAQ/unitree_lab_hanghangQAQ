@@ -126,10 +126,19 @@ class NP3ORolloutStorage(RolloutStorage):
         self.cost_advantages = self.cost_returns - self.cost_values
 
         # 可选归一化（通常每个 cost 单独归一化，避免量纲不同）
+        # if normalize_cost_advantage:
+        #     mean = self.cost_advantages.mean(dim=(0, 1), keepdim=True)  # (1,1,C)
+        #     std = self.cost_advantages.std(dim=(0, 1), keepdim=True) + 1e-8
+        #     self.cost_advantages = (self.cost_advantages - mean) / std
         if normalize_cost_advantage:
-            mean = self.cost_advantages.mean(dim=(0, 1), keepdim=True)  # (1,1,C)
-            std = self.cost_advantages.std(dim=(0, 1), keepdim=True) + 1e-8
-            self.cost_advantages = (self.cost_advantages - mean) / std
+            # 修改：将均值和标准差保存为类属性，供后续 update() 使用
+            self.cost_advantages_mean = self.cost_advantages.mean(dim=(0, 1), keepdim=True)
+            self.cost_advantages_std = self.cost_advantages.std(dim=(0, 1), keepdim=True) + 1e-8
+            self.cost_advantages = (self.cost_advantages - self.cost_advantages_mean) / self.cost_advantages_std
+        else:
+            # 如果不归一化，设定默认均值为 0，方差为 1，保持数学公式的通用性
+            self.cost_advantages_mean = torch.zeros((1, 1, self.num_costs), device=self.device)
+            self.cost_advantages_std = torch.ones((1, 1, self.num_costs), device=self.device)
     # ==========================================================================
 
     # ==================== 新增：mini-batch 产出 cost batch ====================
