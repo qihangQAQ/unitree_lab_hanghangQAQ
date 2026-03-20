@@ -327,7 +327,7 @@ class RewardsCfg:
     # 特定侧滑步态 (你要求的步态)
     feet_gait_spray = RewTerm(
         func=mdp.feet_gait_spray,  # 请确保你已经把这个函数加到了 rewards.py 中
-        weight=2.0,
+        weight=1.0,
         params={
             "period": 0.6,
             "offset": [0.0, 0.5],
@@ -345,7 +345,7 @@ class RewardsCfg:
     base_face_surface_normal = RewTerm(
         func=mdp.base_face_surface_normal, 
         weight=2.0, 
-        params={"command_name": "hand_tracking", "std": 0.2}
+        params={"command_name": "hand_tracking", "std": 0.35}
     )
 
     # =================== 4. 手臂锁  ===================
