@@ -86,15 +86,24 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     cfg["observations"] = {}
     for obs_name, obs_cfg in obs_terms:
         obs_dims = tuple(obs_cfg.func(env, **obs_cfg.params).shape)
+        # 获取特征维度（支持一维或二维形状）
+        if len(obs_dims) == 1:
+            feature_dim = obs_dims[0]
+        elif len(obs_dims) == 2:
+            feature_dim = obs_dims[1]
+        else:
+            # 如果维度不预期，使用最后一个维度作为特征维度
+            feature_dim = obs_dims[-1]
+
         term_cfg = obs_cfg.copy()
         if term_cfg.scale is not None:
             scale = term_cfg.scale.detach().cpu().numpy().tolist()
             if isinstance(scale, float):
-                term_cfg.scale = [scale for _ in range(obs_dims[1])]
+                term_cfg.scale = [scale for _ in range(feature_dim)]
             else:
                 term_cfg.scale = scale
         else:
-            term_cfg.scale = [1.0 for _ in range(obs_dims[1])]
+            term_cfg.scale = [1.0 for _ in range(feature_dim)]
         if term_cfg.clip is not None:
             term_cfg.clip = list(term_cfg.clip)
         if term_cfg.history_length == 0:

@@ -46,3 +46,17 @@ def ray2d_distances(env: ManagerBasedRLEnv, command_name: str = "position") -> t
     # return torch.log2(ray_obs)
 
     return ray_obs
+
+
+def base_height(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """返回机器人基座的高度（Z坐标）。
+
+    用于观测基座距离地面的高度。
+
+    Returns:
+        torch.Tensor: 基座高度，形状为 (num_envs, 1)
+    """
+    asset = env.scene["robot"]
+    # root_pos_w: (num_envs, 3) [x, y, z]
+    # 返回 z 坐标，保持二维形状 (num_envs, 1)
+    return asset.data.root_pos_w[:, 2:3]
