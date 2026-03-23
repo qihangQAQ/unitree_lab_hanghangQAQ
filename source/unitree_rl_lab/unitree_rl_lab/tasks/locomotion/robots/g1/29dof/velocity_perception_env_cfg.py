@@ -205,6 +205,10 @@ class ObservationsCfg:
         # 新增观测
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel)  # 局部机身线速度（3维）
         base_height = ObsTerm(func=mdp.base_height)  # 基座高度（1维）
+        feet_contact_forces = ObsTerm(
+            func=mdp.feet_contact_forces,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*")},
+        )
         height_scanner = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
@@ -235,6 +239,10 @@ class ObservationsCfg:
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             clip=(-1.0, 5.0),
+        )
+        feet_contact_forces = ObsTerm(
+            func=mdp.feet_contact_forces,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*")},
         )
         # 基座高度对于critic可能也是有用的特权信息
         base_height = ObsTerm(func=mdp.base_height)

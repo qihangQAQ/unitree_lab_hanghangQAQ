@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 from typing import TYPE_CHECKING
+from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -60,3 +61,26 @@ def base_height(env: ManagerBasedRLEnv) -> torch.Tensor:
     # root_pos_w: (num_envs, 3) [x, y, z]
     # 返回 z 坐标，保持二维形状 (num_envs, 1)
     return asset.data.root_pos_w[:, 2:3]
+
+
+def feet_contact_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """返回左右脚足底的接触力（每个脚3维力向量，共6维）。
+
+    从接触传感器中提取指定身体（通常为左右脚踝）的 net_forces_w（世界坐标系下的力）。
+
+    Args:
+        env: 环境实例
+        sensor_cfg: 传感器配置，指定传感器名称和身体名称
+
+    Returns:
+        torch.Tensor: 接触力，形状为 (num_envs, 6)，其中前3维为左脚，后3维为右脚。
+    """
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    # net_forces_w 形状: (num_envs, num_bodies, 3)
+    forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
+    # 假设 sensor_cfg.body_ids 按顺序包含左脚和右脚的身体ID
+    # 展平最后两个维度: (num_envs, num_bodies * 3)
+    batch_size = forces.shape[0]
+    num_bodies = forces.shape[1]
+    flattened = forces.reshape(batch_size, num_bodies * 3)
+    return flattened
