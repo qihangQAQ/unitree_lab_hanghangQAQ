@@ -36,6 +36,52 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     },
 )
 
+ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,  # 对应 10 个难度等级
+    num_cols=20,  # 对应不同的地形类型
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        # 1. 随机金字塔阶梯 (类似文章中的复杂地形)
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.05, 0.23), # 动态难度范围
+            step_width=0.3,
+            platform_width=3.0,
+        ),
+        # 2. 离散障碍物 (对应你图片中的方块感)
+        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            obstacle_height_range=(0.05, 0.2),
+            obstacle_width_range=(1.0, 2.0),
+            num_obstacles=40,
+        ),
+        # 3. 标准阶梯
+        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.05, 0.2),
+            step_width=0.3,
+            platform_width=3.0
+        ),
+        # 4. 坑洼/波浪地面
+        "random_rough": terrain_gen.HfWaveTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            amplitude_range=(0.01, 0.05),
+            num_waves=3,
+        ),
+        # 5. 平地 (用于初始训练缓冲)
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
+    },
+)
+
 
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
@@ -45,8 +91,8 @@ class RobotSceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",  # "plane", "generator"
-        terrain_generator=COBBLESTONE_ROAD_CFG,  # None, ROUGH_TERRAINS_CFG
-        max_init_terrain_level=COBBLESTONE_ROAD_CFG.num_rows - 1,
+        terrain_generator=ROUGH_TERRAINS_CFG,  # None, COBBLESTONE_ROAD_CFG
+        max_init_terrain_level=5,  # 初始从中间难度开始，ROUGH_TERRAINS_CFG有10个等级
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -70,7 +116,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
         pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
+        debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
     contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
@@ -325,7 +371,7 @@ class RewardsCfg:
     # 惩罚基座倾斜，通过重力投影在水平面的分量鼓励保持直立。
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
     # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
+    base_height = RewTerm(func=mdp.base_height_l2, weight=-5, params={"target_height": 0.78})
 
     # -- feet
     # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
@@ -385,7 +431,8 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+    # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+    terrain_levels = CurrTerm(func=mdp.terrain_levels_hpc_style)
     lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
@@ -435,7 +482,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 32
+        self.scene.num_envs =4
         self.scene.terrain.terrain_generator.num_rows = 2
         self.scene.terrain.terrain_generator.num_cols = 10
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges

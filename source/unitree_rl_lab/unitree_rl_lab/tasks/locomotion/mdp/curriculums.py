@@ -229,3 +229,44 @@ def arm_tracking_reward_curriculum(
             print(f"[Curriculum] 当前手臂奖励放开比例: {env.arm_reward_scale * 100:.1f}%")
 
     return torch.tensor(env.arm_reward_scale, device=env.device)
+
+def terrain_levels_hpc_style(
+    env: ManagerBasedRLEnv, 
+    env_ids: Sequence[int], 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """适配 HPC 论文的地形课程设计。
+
+    该函数根据机器人在 Episode 内的实际行走距离来调整地形等级：
+    - 晋升：如果机器人能稳定走过方格的一半（证明其具备跨越当前难度障碍的能力）。
+    - 降级：如果机器人位移极短（通常代表出生即摔倒或被障碍物完全卡死）。
+    """
+    # 1. 提取必要的句柄
+    asset: Articulation = env.scene[asset_cfg.name]
+    terrain: TerrainImporter = env.scene.terrain
+    
+    # 2. 计算机器人从出生点（方格中心）开始的水平位移
+    # 论文中提到机器人是在多样化挑战地形中行走 
+    relative_dist = torch.norm(asset.data.root_pos_w[env_ids, :2] - terrain.env_origins[env_ids, :2], dim=1)
+    
+    # 3. 设置升级门槛 (Move Up)
+    # 原版使用 terrain_generator.size[0] / 2。
+    # 为了达到你要求的 80% 难度效果，我们保持这个门槛，
+    # 只要机器人能走过方块一半距离（通常是 4.0m），就认为它具备挑战下一级难度的资格。
+    move_up = relative_dist > (terrain.cfg.terrain_generator.size[0] * 0.5)
+    
+    # 4. 设置降级门槛 (Move Down)
+    # 论文逻辑：如果走不动（行走距离过短），则认为当前地形过难 
+    # 我们设定一个绝对阈值：如果 20s 内位移小于 0.5m，判定为失败。
+    # 这比原版（依赖指令速度的 50%）更稳定，避免因为给定的指令速度过小导致不降级。
+    move_down = relative_dist < 0.5
+    
+    # 降级逻辑排除掉已经达到升级标准的 env
+    move_down *= ~move_up
+    
+    # 5. 更新地形等级和环境原点
+    # 这将导致表现好的机器人被搬运到 Row + 1 的方格 
+    terrain.update_env_origins(env_ids, move_up, move_down)
+    
+    # 6. 返回当前所有环境的平均地形等级（用于 Tensorboard 日志记录显示难度曲线）
+    return torch.mean(terrain.terrain_levels[env_ids].float())

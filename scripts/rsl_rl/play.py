@@ -50,6 +50,13 @@ import os
 import time
 import torch
 
+# 导入 NP3O 扩展包（猴子补丁注入）
+try:
+    import unitree_rl_lab.rsl_rl_ext
+    print("[INFO] NP3O 扩展包已导入，猴子补丁注入完成")
+except ImportError as e:
+    print(f"[WARNING] 无法导入 NP3O 扩展包: {e}")
+
 from rsl_rl.runners import OnPolicyRunner
 
 import isaaclab_tasks  # noqa: F401
@@ -62,7 +69,6 @@ from isaaclab_tasks.utils import get_checkpoint_path
 
 import unitree_rl_lab.tasks  # noqa: F401
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
-from rsl_rl.runners import NP3ORunner
 
 
 def main():
@@ -121,7 +127,13 @@ def main():
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
         # ▼▼▼▼▼▼▼▼ 新增这段 elif ▼▼▼▼▼▼▼▼
     elif agent_cfg.class_name == "NP3ORunner":
-        runner = NP3ORunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        try:
+            # 首先尝试从 rsl_rl.runners 导入（猴子补丁注入后可用）
+            runner = NP3ORunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        except NameError:
+            # 如果猴子补丁失败，从扩展包直接导入
+            from unitree_rl_lab.rsl_rl_ext import NP3ORunner as NP3ORunnerExt
+            runner = NP3ORunnerExt(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
         # ▲▲▲▲▲▲▲▲ 新增结束 ▲▲▲▲▲▲▲▲
     elif agent_cfg.class_name == "DistillationRunner":
         from rsl_rl.runners import DistillationRunner
