@@ -39,33 +39,33 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
 ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
     size=(8.0, 8.0),
     border_width=20.0,
-    num_rows=10,  # 对应 10 个难度等级
-    num_cols=20,  # 对应不同的地形类型
+    num_rows=10,  
+    num_cols=20,  
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
     use_cache=False,
     sub_terrains={
-        # 1. 随机金字塔阶梯 (类似文章中的复杂地形)
+        # 1. 随机金字塔阶梯
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.2,
-            step_height_range=(0.05, 0.23), # 动态难度范围
+            step_height_range=(0.0, 0.23), # 下界改为 0.0
             step_width=0.3,
             platform_width=3.0,
         ),
-        # 2. 离散障碍物 (对应你图片中的方块感)
+        # 2. 离散障碍物
         "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
             proportion=0.2,
             horizontal_scale=0.1,
             vertical_scale=0.005,
-            obstacle_height_range=(0.05, 0.2),
+            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
             obstacle_width_range=(1.0, 2.0),
             num_obstacles=40,
         ),
         # 3. 标准阶梯
         "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.2,
-            step_height_range=(0.05, 0.2),
+            step_height_range=(0.0, 0.2), # 下界改为 0.0
             step_width=0.3,
             platform_width=3.0
         ),
@@ -74,10 +74,10 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             proportion=0.2,
             horizontal_scale=0.1,
             vertical_scale=0.005,
-            amplitude_range=(0.01, 0.05),
+            amplitude_range=(0.0, 0.05), # 下界改为 0.0
             num_waves=3,
         ),
-        # 5. 平地 (用于初始训练缓冲)
+        # 5. 平地保持不变
         "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
     },
 )
@@ -92,7 +92,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",  # "plane", "generator"
         terrain_generator=ROUGH_TERRAINS_CFG,  # None, COBBLESTONE_ROAD_CFG
-        max_init_terrain_level=5,  # 初始从中间难度开始，ROUGH_TERRAINS_CFG有10个等级
+        max_init_terrain_level=0,  # 初始从中间难度开始，ROUGH_TERRAINS_CFG有10个等级
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -371,7 +371,11 @@ class RewardsCfg:
     # 惩罚基座倾斜，通过重力投影在水平面的分量鼓励保持直立。
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
     # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-5, params={"target_height": 0.78})
+    base_height = RewTerm(
+        func=mdp.base_height_l2, 
+        weight=-10, 
+        params={"target_height": 0.78, "sensor_cfg": SceneEntityCfg("height_scanner")}
+    )
 
     # -- feet
     # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
