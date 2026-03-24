@@ -240,21 +240,31 @@ class ObservationsCfg:
         """Observations for policy group."""
 
         # observation terms (order preserved)
+        # 机身角速度（3）
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2)
+        # 重力向量（3）、
         projected_gravity = ObsTerm(func=mdp.projected_gravity)
+        # 指令根节点线速度（3）
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
+        # 关节位置（29）
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
+        # 关节速度（29）
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
+        # 上一帧动作（29）
         last_action = ObsTerm(func=mdp.last_action)
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
 
         # 新增观测
+        # 局部机身线速度（3）
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel)  # 局部机身线速度（3维）
+        # 基座 高度（1）
         base_height = ObsTerm(func=mdp.base_height)  # 基座高度（1维）
+        # •双脚接触力（6）
         feet_contact_forces = ObsTerm(
             func=mdp.feet_contact_forces,
             params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*")},
         )
+        # 高度扫描（187）
         height_scanner = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
