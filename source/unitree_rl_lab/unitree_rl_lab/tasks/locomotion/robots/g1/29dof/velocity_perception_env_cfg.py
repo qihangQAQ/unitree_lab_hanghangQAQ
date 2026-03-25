@@ -91,7 +91,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",  # "plane", "generator"
-        terrain_generator=ROUGH_TERRAINS_CFG,  # None, COBBLESTONE_ROAD_CFG
+        terrain_generator=COBBLESTONE_ROAD_CFG,  # None, COBBLESTONE_ROAD_CFG
         max_init_terrain_level=0,  # 初始从中间难度开始，ROUGH_TERRAINS_CFG有10个等级
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -373,7 +373,7 @@ class RewardsCfg:
     # 惩罚特定腿部关节（如髋关节）偏离默认位置。
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1.0,
+        weight=-0.5,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
     )
 
@@ -389,17 +389,68 @@ class RewardsCfg:
 
     # -- feet
     # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
-    gait = RewTerm(
-        func=mdp.feet_gait,
-        weight=0.5,
+    # gait = RewTerm(
+    #     func=mdp.feet_gait,
+    #     weight=0.5,
+    #     params={
+    #         "period": 0.8,
+    #         "offset": [0.0, 0.5],
+    #         "threshold": 0.55,
+    #         "command_name": "base_velocity",
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+    #     },
+    # )
+    # 新增 -- 1. 奖励摆动脚有合理离地时间
+    feet_air_time = RewTerm(
+        func=mdp.feet_air_time_biped,
+        weight=0.50,
         params={
-            "period": 0.8,
-            "offset": [0.0, 0.5],
-            "threshold": 0.55,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
             "command_name": "base_velocity",
+            "threshold": 0.35,
+            "max_air_time": 0.8,
+        },
+    )
+
+    # 新增 -- 2.惩罚脚撞到竖直面/台阶边
+    feet_stumble = RewTerm(
+        func=mdp.feet_stumble,
+        weight=-1.5,
+        params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
+    # 新增 --3.双脚过近惩罚
+    feet_too_near = RewTerm(
+        func=mdp.feet_too_near,
+        weight=-1.0,
+        params={
+            "threshold": 0.18,
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+        },
+    )
+
+    # 新增 -- 4.静止命令时鼓励双脚都接触地面：可选，小权重
+    feet_contact_without_cmd = RewTerm(
+        func=mdp.feet_contact_without_cmd,
+        weight=0.05,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+            "command_name": "base_velocity",
+        },
+    )
+
+    # 新增 -- 5. 足端落地冲击惩罚
+    feet_force = RewTerm(
+        func=mdp.feet_contact_force_penalty,
+        weight=-3e-3,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+            "threshold": 500.0,
+            "max_excess": 400.0,
+        },
+    )
+  
     # 惩罚脚在接触地面时的水平滑动，防止打滑。
     feet_slide = RewTerm(
         func=mdp.feet_slide,
@@ -409,17 +460,20 @@ class RewardsCfg:
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
-    # 正向奖励，鼓励摆动脚在离地阶段达到目标离地高度。
-    feet_clearance = RewTerm(
-        func=mdp.foot_clearance_reward,
-        weight=1.0,
-        params={
-            "std": 0.05,
-            "tanh_mult": 2.0,
-            "target_height": 0.1,
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-        },
-    )
+    # # 正向奖励，鼓励摆动脚在离地阶段达到目标离地高度。
+    # feet_clearance = RewTerm(
+    #     func=mdp.foot_clearance_reward,
+    #     weight=1.0,
+    #     params={
+    #         "std": 0.05,
+    #         "tanh_mult": 2.0,
+    #         "target_height": 0.1,
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+    #     },
+    # )
+
+
+
 
     # 惩罚除脚踝外其他身体部位与地面的接触，避免意外碰撞。
     undesired_contacts = RewTerm(
@@ -446,7 +500,7 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    terrain_levels = CurrTerm(func=mdp.terrain_levels_hpc_style)
+    # terrain_levels = CurrTerm(func=mdp.terrain_levels_hpc_style)
     lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 

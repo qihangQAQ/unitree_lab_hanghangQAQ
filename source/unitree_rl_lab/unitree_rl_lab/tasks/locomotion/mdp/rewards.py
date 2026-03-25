@@ -1091,3 +1091,53 @@ def joint_deviation_arms_curriculum(
 
     # 返回动态组合的惩罚值
     return left_dev + right_dev * right_penalty_weight
+
+
+
+def feet_air_time_biped(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str = "base_velocity",
+    threshold: float = 0.35,
+    max_air_time: float = 0.8,
+) -> torch.Tensor:
+    """奖励双足在运动时具有合理的摆动离地时间。
+    只在“首次落地”时结算上一段 air time，避免一整个接触相都重复奖励。
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    if contact_sensor.cfg.track_air_time is False:
+        raise RuntimeError("Activate ContactSensor's track_air_time!")
+
+    current_contact_time = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids]
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+
+    # 首次接触地面：接触时间刚刚开始
+    first_contact = (current_contact_time > 0.0) & (current_contact_time < (env.step_dt + 1e-4))
+
+    # 只奖励超过阈值的 air time，避免碎步
+    air_rew = torch.clamp(last_air_time - threshold, min=0.0, max=max_air_time)
+    reward = torch.sum(air_rew * first_contact.float(), dim=1)
+
+    cmd = env.command_manager.get_command(command_name)
+    cmd_norm = torch.norm(cmd[:, :2], dim=1)
+    move_mask = cmd_norm > 0.1
+
+    return reward * move_mask.float()
+
+
+def feet_contact_force_penalty(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 500.0,
+    max_excess: float = 400.0,
+) -> torch.Tensor:
+    """惩罚足端过大的接触冲击力。
+    逻辑参考作者开源里的 feet_force / body_force 风格。
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    force_mag = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
+    excess = torch.clamp(force_mag - threshold, min=0.0, max=max_excess)
+
+    # 归一化到相对稳定的量级，方便配 weight
+    return torch.sum(excess, dim=1) / max_excess
