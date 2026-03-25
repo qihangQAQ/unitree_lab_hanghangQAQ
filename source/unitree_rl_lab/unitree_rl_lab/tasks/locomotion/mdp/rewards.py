@@ -1091,3 +1091,68 @@ def joint_deviation_arms_curriculum(
 
     # 返回动态组合的惩罚值
     return left_dev + right_dev * right_penalty_weight
+
+
+def _tracking_move_masks(
+    env: ManagerBasedRLEnv,
+    command_name: str = "hand_tracking",
+    move_speed_thresh: float = 0.03,
+    stop_speed_thresh: float = 0.015,
+):
+    """基于 hand_tracking 命令计算‘该走/该停’掩码。
+    这里用的是任务真正想让底盘达到的平面速度，而不是末端位置误差。
+    """
+    cmd_term = env.command_manager.get_term(command_name)
+
+    # 当前轨迹切线（base系） * 标量喷涂速度
+    desired_v_xy = cmd_term.current_tangent_b[:, :2] * cmd_term.command[:, 24].unsqueeze(1)
+    desired_speed_xy = torch.norm(desired_v_xy, dim=1)
+
+    move_mask = desired_speed_xy > move_speed_thresh
+    stop_mask = desired_speed_xy < stop_speed_thresh
+    return desired_speed_xy, move_mask, stop_mask
+
+def feet_air_time_tracking(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str = "hand_tracking",
+    threshold: float = 0.18,
+    max_air_time: float = 0.45,
+    move_speed_thresh: float = 0.03,
+) -> torch.Tensor:
+    """只在确实需要平面移动时，奖励合理摆动时间。
+    仍然在首次落地时结算，避免整段接触相重复奖励。
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    if contact_sensor.cfg.track_air_time is False:
+        raise RuntimeError("Activate ContactSensor's track_air_time!")
+
+    current_contact_time = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids]
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+
+    first_contact = (current_contact_time > 0.0) & (current_contact_time < (env.step_dt + 1e-4))
+    air_rew = torch.clamp(last_air_time - threshold, min=0.0, max=max_air_time)
+    reward = torch.sum(air_rew * first_contact.float(), dim=1)
+
+    _, move_mask, _ = _tracking_move_masks(
+        env, command_name=command_name, move_speed_thresh=move_speed_thresh
+    )
+    return reward * move_mask.float()
+
+
+def feet_contact_without_cmd_tracking(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str = "hand_tracking",
+    stop_speed_thresh: float = 0.015,
+) -> torch.Tensor:
+    """任务要求基本不动时，鼓励双脚稳定接地。"""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    is_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0.0
+
+    _, _, stop_mask = _tracking_move_masks(
+        env, command_name=command_name, stop_speed_thresh=stop_speed_thresh
+    )
+
+    both_contact = torch.all(is_contact, dim=1).float()
+    return both_contact * stop_mask.float()
