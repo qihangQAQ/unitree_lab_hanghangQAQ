@@ -91,7 +91,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",  # "plane", "generator"
-        terrain_generator=COBBLESTONE_ROAD_CFG,  # None, COBBLESTONE_ROAD_CFG
+        terrain_generator=ROUGH_TERRAINS_CFG,  # None, COBBLESTONE_ROAD_CFG
         max_init_terrain_level=0,  # 初始从中间难度开始，ROUGH_TERRAINS_CFG有10个等级
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -360,7 +360,7 @@ class RewardsCfg:
     # 惩罚腰部关节偏离默认位置，保持腰部姿态。
     joint_deviation_waists = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1,
+        weight=-0.8,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
@@ -373,7 +373,7 @@ class RewardsCfg:
     # 惩罚特定腿部关节（如髋关节）偏离默认位置。
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.5,
+        weight=-0.2,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
     )
 
@@ -383,7 +383,7 @@ class RewardsCfg:
     # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
     base_height = RewTerm(
         func=mdp.base_height_l2, 
-        weight=-10, 
+        weight=-2, 
         params={"target_height": 0.78, "sensor_cfg": SceneEntityCfg("height_scanner")}
     )
 
@@ -492,7 +492,7 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.2})
-    bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
+    bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.9})
 
 
 @configclass
@@ -500,7 +500,7 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    # terrain_levels = CurrTerm(func=mdp.terrain_levels_hpc_style)
+    terrain_levels = CurrTerm(func=mdp.terrain_levels_hpc_style)
     lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
@@ -550,7 +550,35 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs =4
-        self.scene.terrain.terrain_generator.num_rows = 2
-        self.scene.terrain.terrain_generator.num_cols = 10
+        self.scene.num_envs = 4
+        
+        # --- 核心地形难度控制 ---
+        
+        # 1. 确保 Play 时完全禁用地形课程，防止环境原点乱跑
+        if hasattr(self.curriculum, "terrain_levels"):
+            self.curriculum.terrain_levels = None 
+
+        # 2. 地形网格设计 (10行 x 20列 = 200块场地)
+        self.scene.terrain.terrain_generator.num_rows = 10
+        self.scene.terrain.terrain_generator.num_cols = 20
+
+        # self.scene.terrain.terrain_generator.num_rows = 1
+        # self.scene.terrain.terrain_generator.num_cols = 4
+
+        # 2. 锁定地形难度（最低难度0 - 最高难度1）
+        # 在原本 10 个等级（0到9）中，Level 2 的难度大约是：2 / (10 - 1) ≈ 0.222
+        # 我们将难度下界和上界都死锁在 0.222，这样生成出来的所有地形都是标准的 Level 2 难度
+        self.scene.terrain.terrain_generator.difficulty_range = (0, 1)
+        
+        # 3.机器人出生点难度设置
+        self.scene.terrain.max_init_terrain_level = 9
+
+        # 4. 关闭地形自动升降级
+        # 训练时需要课程，但 play 时如果它摔倒了就会被传回简单地形。
+        # 关掉它，让机器人死磕当前脚下的复杂地形，方便你观察。
+        if hasattr(self.curriculum, "terrain_levels"):
+            self.curriculum.terrain_levels = None
+ 
+
+        # 放开速度命令范围进行评估
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
