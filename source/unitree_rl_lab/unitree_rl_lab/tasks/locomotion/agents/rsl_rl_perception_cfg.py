@@ -65,7 +65,7 @@ class UnitreePerceptionRunnerCfg(RslRlOnPolicyRunnerCfg):
 
         # New hyperparameters for perception network
         lstm_hidden_size=256,
-        terrain_encoder_dims=[256, 128],
+        terrain_encoder_dims=[256, 128], # 编码器网络结构 两层MLP（256→128）
     )
 
     # Algorithm configuration (same as PPO)

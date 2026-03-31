@@ -254,16 +254,6 @@ class ObservationsCfg:
         last_action = ObsTerm(func=mdp.last_action)
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
 
-        # 新增观测
-        # 局部机身线速度（3）
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)  # 局部机身线速度（3维）
-        # 基座 高度（1）
-        base_height = ObsTerm(func=mdp.base_height)  # 基座高度（1维）
-        # •双脚接触力（6）
-        feet_contact_forces = ObsTerm(
-            func=mdp.feet_contact_forces,
-            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*")},
-        )
         # 高度扫描（187）
         height_scanner = ObsTerm(
             func=mdp.height_scan,
@@ -296,12 +286,7 @@ class ObservationsCfg:
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             clip=(-1.0, 5.0),
         )
-        feet_contact_forces = ObsTerm(
-            func=mdp.feet_contact_forces,
-            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*")},
-        )
-        # 基座高度对于critic可能也是有用的特权信息
-        base_height = ObsTerm(func=mdp.base_height)
+
 
         def __post_init__(self):
             self.history_length = 1
@@ -460,17 +445,7 @@ class RewardsCfg:
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
-    # # 正向奖励，鼓励摆动脚在离地阶段达到目标离地高度。
-    # feet_clearance = RewTerm(
-    #     func=mdp.foot_clearance_reward,
-    #     weight=1.0,
-    #     params={
-    #         "std": 0.05,
-    #         "tanh_mult": 2.0,
-    #         "target_height": 0.1,
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-    #     },
-    # )
+
 
 
 
@@ -500,7 +475,7 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    terrain_levels = CurrTerm(func=mdp.terrain_levels_hpc_style)
+    terrain_levels = CurrTerm(func=mdp.terrain_levels_new)
     lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
