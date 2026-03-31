@@ -898,7 +898,7 @@ def base_face_surface_normal(
 
 
 def base_xy_pos_tracking(
-        env: ManagerBasedRLEnv,
+        env: "ManagerBasedRLEnv",
         command_name: str,
         asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
         ee_link_name: str = "right_wrist_yaw_link",
@@ -906,9 +906,9 @@ def base_xy_pos_tracking(
         std: float = 0.15,
 ) -> torch.Tensor:
     """
-    [第一阶段] 底盘 XY 平面位置追踪。
-    逻辑：从末端误差反推路径目标点，期望底盘保持默认的 XY 偏置距离。
-    魔法：完全忽略 Z 轴误差！目标点再怎么上下飞，底盘只管在地上平移，不会试图上下乱跳。
+    [第一阶段] 底盘 XY 平面位置追踪 (智能前瞻版)
+    逻辑：手臂末端继续追踪当前点，但底盘的期望位置由“当前点+未来点”的平均值反推得出。
+    效果：轨迹转弯时，底盘会提前响应，像汽车后轮一样走出行云流水的内切/外抛走位，保证手臂姿态舒展。
     """
     robot: Articulation = env.scene[asset_cfg.name]
     cmd_term = env.command_manager.get_term(command_name)
@@ -918,18 +918,27 @@ def base_xy_pos_tracking(
     ee_pos_w = robot.data.body_pos_w[:, ee_link_idx, :3]
     root_quat_w = robot.data.root_quat_w
 
-    # 2. 从指令的 0cm 处观测值反推目标点的世界坐标
-    # command[:, 0:3] 是 base 系下的末端位置误差
-    pos_err_b = cmd_term.command[:, 0:3]
-    pos_err_w = quat_apply(root_quat_w, pos_err_b)
-    target_p_w = ee_pos_w + pos_err_w  # 路径上的实际参考点
+    # ================= 核心修改区域 =================
+    # 从 command 中提取前 3 个点（当前、5cm、10cm）在 Base 系下的位置误差
+    pos_err_b_0 = cmd_term.command[:, 0:3]   # 当前点
+    pos_err_b_1 = cmd_term.command[:, 6:9]   # 前瞻点 1
+    pos_err_b_2 = cmd_term.command[:, 12:15] # 前瞻点 2
 
-    # 3. 计算底盘的期望位置 (目标点减去待机姿态的偏置)
-    # 把偏置从 Base 系转到 World 系
+    # 计算前瞻平均误差（这相当于在曲线内部找了一个“质心”）
+    # 你可以通过调整权重来决定底盘对未来的敏感度，这里简单取平均
+    avg_pos_err_b = (pos_err_b_0 + pos_err_b_1 + pos_err_b_2) / 3.0
+    
+    # 将这个“融合误差”转回世界系，得到底盘专用的虚拟参考点
+    pos_err_w = quat_apply(root_quat_w, avg_pos_err_b)
+    target_p_w_for_base = ee_pos_w + pos_err_w  
+    # ================================================
+
+    # 3. 计算底盘的期望位置 (虚拟目标点减去待机姿态的偏置)
     offset_b = torch.tensor(default_ee_local_pos, device=robot.device).repeat(env.num_envs, 1)
     offset_w = quat_apply(root_quat_w, offset_b)
 
-    desired_base_pos_w = target_p_w - offset_w
+    # 底盘现在的目标是这个融合了未来趋势的位置
+    desired_base_pos_w = target_p_w_for_base - offset_w
 
     # 4. 只算 XY 平面的距离误差
     current_base_pos_w = robot.data.root_pos_w

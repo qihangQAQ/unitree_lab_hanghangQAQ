@@ -392,7 +392,7 @@ class HandTrackingCommandCfg(CommandTermCfg):
     amplitude_range: tuple[float, float] = (0.15, 0.40)  # 波浪/圆环的振幅范围
     frequency_range: tuple[float, float] = (8.0, 15.0)   # 频率范围
     x_noise_scale: float = 0.0012                        # 墙面不平整度 (X 轴随机游走噪声)。
-    normal_noise_scale: float = 0.02                     # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
+    normal_noise_scale: float = 0.00                     # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
 
     start_x_forward: float = 0.50                       # 起点控制：第一点固定在机器人 root 坐标系正前方 50cm 处
     start_y_offset_range: tuple[float, float] = (-0.1, 0.1)# 起点在左右 (Y 轴) 方向上的随机偏移范围，增加初始位置的多样性 (-10cm 到 10cm)

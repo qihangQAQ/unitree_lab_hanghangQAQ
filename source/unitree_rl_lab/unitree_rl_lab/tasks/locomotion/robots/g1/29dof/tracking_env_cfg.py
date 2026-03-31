@@ -179,7 +179,7 @@ class CommandsCfg:
         amplitude_range=(0.15, 0.40),                 # 波浪/圆环的振幅范围
         frequency_range=(8.0, 15.0),                  # 形状的频率范围
         x_noise_scale=0.0012,                         # 墙面不平整度 (X 轴随机游走噪声)
-        normal_noise_scale=0.02,                      # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
+        normal_noise_scale=0.00,                      # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
         
         # 起点与工作空间控制
         start_x_forward=0.50,                         # 起点控制：第一点固定在机器人 root 坐标系正前方 50cm 处
@@ -327,7 +327,7 @@ class RewardsCfg:
     # 
     feet_air_time = RewTerm(
         func=mdp.feet_air_time_tracking,
-        weight=0.5,
+        weight=0.2,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
             "command_name": "hand_tracking",
@@ -347,7 +347,7 @@ class RewardsCfg:
 
     feet_too_near = RewTerm(
         func=mdp.feet_too_near,
-        weight=-0.5,
+        weight=-1.0,
         params={
             "threshold": 0.16,
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
@@ -355,9 +355,19 @@ class RewardsCfg:
     )
 
 
+    feet_slide = RewTerm(
+        func=mdp.feet_slide,
+        weight=-3.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+        },
+    )
+
+
     # =================== 3. 前期单纯的任务追踪  ===================
     base_xy_pos_tracking = RewTerm(func=mdp.base_xy_pos_tracking, weight=2.0,
-                                   params={"command_name": "hand_tracking", "std": 0.15})
+                                   params={"command_name": "hand_tracking", "std": 0.25})
     base_xy_velocity_tracking = RewTerm(func=mdp.base_xy_velocity_tracking, weight=3.0,
                                         params={"command_name": "hand_tracking", "std": 0.1})
     base_face_surface_normal = RewTerm(
@@ -447,14 +457,7 @@ class RewardsCfg:
     #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
     #     },
     # )
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.5,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-        },
-    )
+
     # feet_clearance = RewTerm(
     #     func=mdp.foot_clearance_reward,
     #     weight=1.0,
