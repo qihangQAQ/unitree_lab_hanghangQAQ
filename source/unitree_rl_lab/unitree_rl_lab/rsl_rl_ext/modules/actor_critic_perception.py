@@ -3,6 +3,7 @@ import torch.nn as nn
 
 from rsl_rl.networks import EmpiricalNormalization, Memory
 from rsl_rl.modules.actor_critic_recurrent import ActorCriticRecurrent
+from torch.distributions import Normal
 
 
 class ActorCriticPerception(ActorCriticRecurrent):
@@ -160,6 +161,38 @@ class ActorCriticPerception(ActorCriticRecurrent):
             input_dim = hidden_dim
 
         return nn.Sequential(*layers)
+
+    def update_distribution(self, *args, **kwargs):
+        """
+        重写 update_distribution 方法：
+        保留父类 ActorCriticRecurrent 的所有前向传播（包括 LSTM 的 hidden state 处理），
+        仅在最后一步对标准差 std 进行 clamp 限制，以防止训练后期数值爆炸或 NaN。
+        """
+        # 1. 调用父类方法，完成前向传播并生成基础的 self.distribution
+        super().update_distribution(*args, **kwargs)
+
+        # 2. 从父类计算好的分布中提取当前的 mean
+        mean = self.distribution.mean
+
+        # 3. 加入你的 clamp 限制逻辑来计算 std
+        if self.noise_std_type == "scalar":
+            std = self.std.expand_as(mean)
+            std = torch.clamp(std, min=1e-6)  # scalar 也加个保险
+        elif self.noise_std_type == "log":
+            #  保险1：限制 log_std 防止指数爆炸
+            log_std_clamped = torch.clamp(self.log_std, min=-5.0, max=2.0)
+            
+            # 还原为标准差 (也就是建议里的 scale)
+            std = torch.exp(log_std_clamped).expand_as(mean)
+            
+            #  保险2：硬性限制最终的 std (scale) 的绝对物理范围
+            std = torch.clamp(std, min=1e-6, max=10.0)
+        else:
+            raise ValueError(f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'")
+
+        # 4. 用同样的 mean 和限制过的 std 重新构建分布，覆盖掉父类生成的分布
+        self.distribution = Normal(mean, std)
+
 
     def _recreate_memory_modules(self):
         """Recreate memory modules with original observation dimensions (encoder disabled)."""

@@ -62,6 +62,7 @@ class UnitreePerceptionRunnerCfg(RslRlOnPolicyRunnerCfg):
         actor_hidden_dims=[256, 128],      # MLP after LSTM
         critic_hidden_dims=[256, 128],     # MLP after LSTM
         activation="elu",
+        noise_std_type="log", 
 
         # New hyperparameters for perception network
         lstm_hidden_size=256,

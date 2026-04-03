@@ -280,9 +280,14 @@ class ObservationsCfg:
 
         # 高度扫描（187）
         height_scanner = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            clip=(-1.0, 5.0),
+            func=mdp.height_scan_hpc,
+            params={
+                "sensor_cfg": SceneEntityCfg("height_scanner"),
+                "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
+            },
+            scale = 1.0,
+            clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
+            noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
         )
 
         def __post_init__(self):
@@ -345,7 +350,7 @@ class RewardsCfg:
     # 惩罚关节加速度的平方和，抑制关节运动的突变。
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     # 惩罚动作的变化率，促使控制信号平滑。
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.00)
     # 惩罚关节位置超出软限位的程度，保护机械结构。
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
     # 惩罚能量消耗（关节速度与力矩乘积的绝对值之和）。
