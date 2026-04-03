@@ -36,6 +36,65 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     },
 )
 
+ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,  
+    num_cols=20,  
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    difficulty_range=(0.0, 1.0),
+    use_cache=False,
+    sub_terrains={
+        # 1. 随机金字塔阶梯
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.0, 0.23), # 下界改为 0.0
+            step_width=0.3,
+            platform_width=3.0,
+        ),
+        # 2. 离散障碍物
+        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
+            obstacle_width_range=(1.0, 2.0),
+            num_obstacles=40,
+        ),
+        # 3. 标准阶梯
+        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.0, 0.2), # 下界改为 0.0
+            step_width=0.3,
+            platform_width=3.0
+        ),
+        # 4. 坑洼/波浪地面
+        "random_rough": terrain_gen.HfWaveTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            amplitude_range=(0.0, 0.05), # 下界改为 0.0
+            num_waves=3,
+        ),
+        # 5. 平地保持不变
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
+        # 不规则地面地形（坑洼）
+        "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.1,
+            noise_range=(0.0, 0.05),   # 最大 8cm 凹凸
+            noise_step=0.02,
+        ),
+        # # 坡度地形
+        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.05,
+            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+            platform_width=3.0,
+        ),
+    },
+)
+
 
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
@@ -45,8 +104,8 @@ class RobotSceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",  # "plane", "generator"
-        terrain_generator=COBBLESTONE_ROAD_CFG,  # None, ROUGH_TERRAINS_CFG
-        max_init_terrain_level=COBBLESTONE_ROAD_CFG.num_rows - 1,
+        terrain_generator=ROUGH_TERRAINS_CFG,  # None, ROUGH_TERRAINS_CFG
+        max_init_terrain_level= 3 ,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -200,7 +259,12 @@ class ObservationsCfg:
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05, noise=Unoise(n_min=-1.5, n_max=1.5))
         last_action = ObsTerm(func=mdp.last_action)
+        height_scanner = ObsTerm(func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            clip=(-1.0, 5.0),
+        )
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
+
 
         def __post_init__(self):
             self.history_length = 5
@@ -222,10 +286,10 @@ class ObservationsCfg:
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         last_action = ObsTerm(func=mdp.last_action)
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
-        # height_scanner = ObsTerm(func=mdp.height_scan,
-        #     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-        #     clip=(-1.0, 5.0),
-        # )
+        height_scanner = ObsTerm(func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            clip=(-1.0, 5.0),
+        )
 
         def __post_init__(self):
             self.history_length = 5

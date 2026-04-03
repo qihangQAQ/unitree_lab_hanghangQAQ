@@ -46,39 +46,62 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
     slope_threshold=0.75,
     use_cache=False,
     sub_terrains={
-        # 1. 随机金字塔阶梯
-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.23), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0,
+        # # 1. 随机金字塔阶梯
+        # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.0, 0.23), # 下界改为 0.0
+        #     step_width=0.3,
+        #     platform_width=3.0,
+        # ),
+        # # 2. 离散障碍物
+        # "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+        #     proportion=0.2,
+        #     horizontal_scale=0.1,
+        #     vertical_scale=0.005,
+        #     obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
+        #     obstacle_width_range=(1.0, 2.0),
+        #     num_obstacles=40,
+        # ),
+        # # 3. 标准阶梯
+        # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.0, 0.2), # 下界改为 0.0
+        #     step_width=0.3,
+        #     platform_width=3.0
+        # ),
+        # # 4. 坑洼/波浪地面
+        # "random_rough": terrain_gen.HfWaveTerrainCfg(
+        #     proportion=0.2,
+        #     horizontal_scale=0.1,
+        #     vertical_scale=0.005,
+        #     amplitude_range=(0.0, 0.05), # 下界改为 0.0
+        #     num_waves=3,
+        # ),
+        # # 5. 平地保持不变
+        # "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
+        # 不规则地面地形（坑洼）
+        # "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
+        #     proportion=0.1,
+        #     noise_range=(0.0, 0.05),   # 最大 8cm 凹凸
+        #     noise_step=0.02,
+        # ),
+        # 不规则高低地形（台阶）
+        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+            proportion=0.05,
+            grid_width=0.49,
+            grid_height_range=(0.0, 0.25),
         ),
-        # 2. 离散障碍物
-        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-            proportion=0.2,
-            horizontal_scale=0.1,
-            vertical_scale=0.005,
-            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
-            obstacle_width_range=(1.0, 2.0),
-            num_obstacles=40,
-        ),
-        # 3. 标准阶梯
-        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.2), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0
-        ),
-        # 4. 坑洼/波浪地面
-        "random_rough": terrain_gen.HfWaveTerrainCfg(
-            proportion=0.2,
-            horizontal_scale=0.1,
-            vertical_scale=0.005,
-            amplitude_range=(0.0, 0.05), # 下界改为 0.0
-            num_waves=3,
-        ),
-        # 5. 平地保持不变
-        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
+
+        # # 坡度地形
+        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+        #     proportion=0.05,
+        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+        #     platform_width=3.0,
+        # ),
+        # "pit": terrain_gen.MeshPitTerrainCfg(
+        #     proportion=0.05,
+        #     pit_depth_range=(0.3, 0.5), # 坑深 30‑50cm
+        # ),
     },
 )
 
@@ -111,6 +134,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
     robot: ArticulationCfg = ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
     # sensors
+    # 定义扫描范围 宽度1m * 长度1.6m,分辨率0.1m(两条射线之间的间隔是 0.1 米)
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/torso_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
@@ -534,16 +558,16 @@ class RobotPlayEnvCfg(RobotEnvCfg):
             self.curriculum.terrain_levels = None 
 
         # 2. 地形网格设计 (10行 x 20列 = 200块场地)
-        self.scene.terrain.terrain_generator.num_rows = 10
-        self.scene.terrain.terrain_generator.num_cols = 20
+        # self.scene.terrain.terrain_generator.num_rows = 10
+        # self.scene.terrain.terrain_generator.num_cols = 20
 
-        # self.scene.terrain.terrain_generator.num_rows = 1
-        # self.scene.terrain.terrain_generator.num_cols = 4
+        self.scene.terrain.terrain_generator.num_rows = 1
+        self.scene.terrain.terrain_generator.num_cols = 4
 
         # 2. 锁定地形难度（最低难度0 - 最高难度1）
         # 在原本 10 个等级（0到9）中，Level 2 的难度大约是：2 / (10 - 1) ≈ 0.222
         # 我们将难度下界和上界都死锁在 0.222，这样生成出来的所有地形都是标准的 Level 2 难度
-        self.scene.terrain.terrain_generator.difficulty_range = (0, 1)
+        self.scene.terrain.terrain_generator.difficulty_range = (1, 1)
         
         # 3.机器人出生点难度设置
         self.scene.terrain.max_init_terrain_level = 9
