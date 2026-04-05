@@ -44,32 +44,31 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
-    difficulty_range=(0.0, 1.0),
     use_cache=False,
     sub_terrains={
-        # 1. 随机金字塔阶梯
-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.23), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0,
-        ),
-        # 2. 离散障碍物
-        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-            proportion=0.2,
-            horizontal_scale=0.1,
-            vertical_scale=0.005,
-            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
-            obstacle_width_range=(1.0, 2.0),
-            num_obstacles=40,
-        ),
-        # 3. 标准阶梯
-        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.2), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0
-        ),
+        # # 1. 随机金字塔阶梯
+        # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.0, 0.23), # 下界改为 0.0
+        #     step_width=0.3,
+        #     platform_width=3.0,
+        # ),
+        # # 2. 离散障碍物
+        # "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+        #     proportion=0.2,
+        #     horizontal_scale=0.1,
+        #     vertical_scale=0.005,
+        #     obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
+        #     obstacle_width_range=(1.0, 2.0),
+        #     num_obstacles=40,
+        # ),
+        # # 3. 标准阶梯
+        # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.0, 0.2), # 下界改为 0.0
+        #     step_width=0.3,
+        #     platform_width=3.0
+        # ),
         # 4. 坑洼/波浪地面
         "random_rough": terrain_gen.HfWaveTerrainCfg(
             proportion=0.2,
@@ -80,18 +79,29 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         ),
         # 5. 平地保持不变
         "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
-        # 不规则地面地形（坑洼）
+        不规则地面地形（坑洼）
         "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
             proportion=0.1,
             noise_range=(0.0, 0.05),   # 最大 8cm 凹凸
             noise_step=0.02,
         ),
+        # # 不规则高低地形（台阶）
+        # "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+        #     proportion=0.05,
+        #     grid_width=0.49,
+        #     grid_height_range=(0.0, 0.25),
+        # ),
+
         # # 坡度地形
-        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.05,
-            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
-            platform_width=3.0,
-        ),
+        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+        #     proportion=0.05,
+        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+        #     platform_width=3.0,
+        # ),
+        # "pit": terrain_gen.MeshPitTerrainCfg(
+        #     proportion=0.05,
+        #     pit_depth_range=(0.3, 0.5), # 坑深 30‑50cm
+        # ),
     },
 )
 
@@ -105,7 +115,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",  # "plane", "generator"
         terrain_generator=ROUGH_TERRAINS_CFG,  # None, ROUGH_TERRAINS_CFG
-        max_init_terrain_level= 3 ,
+        max_init_terrain_level= 0 ,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -259,10 +269,17 @@ class ObservationsCfg:
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05, noise=Unoise(n_min=-1.5, n_max=1.5))
         last_action = ObsTerm(func=mdp.last_action)
-        height_scanner = ObsTerm(func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            clip=(-1.0, 5.0),
-        )
+        # 高度扫描（187）
+        # height_scanner = ObsTerm(
+        #     func=mdp.height_scan_hpc,
+        #     params={
+        #         "sensor_cfg": SceneEntityCfg("height_scanner"),
+        #         "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
+        #     },
+        #     scale = 1.0,
+        #     clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
+        #     noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
+        # )
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
 
 
@@ -286,10 +303,16 @@ class ObservationsCfg:
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         last_action = ObsTerm(func=mdp.last_action)
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
-        height_scanner = ObsTerm(func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            clip=(-1.0, 5.0),
-        )
+        # height_scanner = ObsTerm(
+        #     func=mdp.height_scan_hpc,
+        #     params={
+        #         "sensor_cfg": SceneEntityCfg("height_scanner"),
+        #         "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
+        #     },
+        #     scale = 1.0,
+        #     clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
+        #     noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
+        # )
 
         def __post_init__(self):
             self.history_length = 5
@@ -479,7 +502,35 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 32
-        self.scene.terrain.terrain_generator.num_rows = 2
-        self.scene.terrain.terrain_generator.num_cols = 10
+        self.scene.num_envs = 4
+        
+        # --- 核心地形难度控制 ---
+        
+        # 1. 确保 Play 时完全禁用地形课程，防止环境原点乱跑
+        if hasattr(self.curriculum, "terrain_levels"):
+            self.curriculum.terrain_levels = None 
+
+        # 2. 地形网格设计 (10行 x 20列 = 200块场地)
+        # self.scene.terrain.terrain_generator.num_rows = 10
+        # self.scene.terrain.terrain_generator.num_cols = 20
+
+        self.scene.terrain.terrain_generator.num_rows = 1
+        self.scene.terrain.terrain_generator.num_cols = 4
+
+        # 2. 锁定地形难度（最低难度0 - 最高难度1）
+        # 在原本 10 个等级（0到9）中，Level 2 的难度大约是：2 / (10 - 1) ≈ 0.222
+        # 我们将难度下界和上界都死锁在 0.222，这样生成出来的所有地形都是标准的 Level 2 难度
+        self.scene.terrain.terrain_generator.difficulty_range = (1, 1)
+        
+        # 3.机器人出生点难度设置
+        self.scene.terrain.max_init_terrain_level = 9
+
+        # 4. 关闭地形自动升降级
+        # 训练时需要课程，但 play 时如果它摔倒了就会被传回简单地形。
+        # 关掉它，让机器人死磕当前脚下的复杂地形，方便你观察。
+        if hasattr(self.curriculum, "terrain_levels"):
+            self.curriculum.terrain_levels = None
+ 
+
+        # 放开速度命令范围进行评估
         self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
