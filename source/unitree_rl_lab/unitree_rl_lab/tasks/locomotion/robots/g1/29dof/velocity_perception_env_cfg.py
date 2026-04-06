@@ -69,35 +69,35 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         #     step_width=0.3,
         #     platform_width=3.0
         # ),
-        # # 4. 坑洼/波浪地面
-        # "random_rough": terrain_gen.HfWaveTerrainCfg(
-        #     proportion=0.2,
-        #     horizontal_scale=0.1,
-        #     vertical_scale=0.005,
-        #     amplitude_range=(0.0, 0.05), # 下界改为 0.0
-        #     num_waves=3,
-        # ),
-        # # 5. 平地保持不变
-        # "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
+        # 4. 坑洼/波浪地面
+        "random_rough": terrain_gen.HfWaveTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            amplitude_range=(0.0, 0.05), # 下界改为 0.0
+            num_waves=3,
+        ),
+        # 5. 平地保持不变
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
         # 不规则地面地形（坑洼）
-        # "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
-        #     proportion=0.1,
-        #     noise_range=(0.0, 0.05),   # 最大 8cm 凹凸
-        #     noise_step=0.02,
-        # ),
+        "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.1,
+            noise_range=(0.0, 0.06),   # 最大 8cm 凹凸
+            noise_step=0.02,
+        ),
         # 不规则高低地形（台阶）
         "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
             proportion=0.05,
             grid_width=0.49,
-            grid_height_range=(0.0, 0.25),
+            grid_height_range=(0.0, 0.1),
         ),
 
-        # # 坡度地形
-        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-        #     proportion=0.05,
-        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
-        #     platform_width=3.0,
-        # ),
+        # 坡度地形
+        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.05,
+            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+            platform_width=3.0,
+        ),
         # "pit": terrain_gen.MeshPitTerrainCfg(
         #     proportion=0.05,
         #     pit_depth_range=(0.3, 0.5), # 坑深 30‑50cm
@@ -279,16 +279,16 @@ class ObservationsCfg:
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
 
         # 高度扫描（187）
-        height_scanner = ObsTerm(
-            func=mdp.height_scan_hpc,
-            params={
-                "sensor_cfg": SceneEntityCfg("height_scanner"),
-                "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
-            },
-            scale = 1.0,
-            clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
-            noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
-        )
+        # height_scanner = ObsTerm(
+        #     func=mdp.height_scan_hpc,
+        #     params={
+        #         "sensor_cfg": SceneEntityCfg("height_scanner"),
+        #         "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
+        #     },
+        #     scale = 1.0,
+        #     clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
+        #     noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
+        # )
 
         def __post_init__(self):
             self.history_length = 1  # 取消历史帧
@@ -310,11 +310,11 @@ class ObservationsCfg:
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         last_action = ObsTerm(func=mdp.last_action)
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
-        height_scanner = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            clip=(-1.0, 5.0),
-        )
+        # height_scanner = ObsTerm(
+        #     func=mdp.height_scan,
+        #     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+        #     clip=(-1.0, 5.0),
+        # )
 
 
         def __post_init__(self):
@@ -395,11 +395,11 @@ class RewardsCfg:
     # 惩罚基座倾斜，通过重力投影在水平面的分量鼓励保持直立。
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
     # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
-    base_height = RewTerm(
-        func=mdp.base_height_l2, 
-        weight=-2, 
-        params={"target_height": 0.78, "sensor_cfg": SceneEntityCfg("height_scanner")}
-    )
+    # base_height = RewTerm(
+    #     func=mdp.base_height_l2, 
+    #     weight=-2, 
+    #     params={"target_height": 0.78, "sensor_cfg": SceneEntityCfg("height_scanner")}
+    # )
 
     # -- feet
     # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
@@ -496,15 +496,15 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.2})
-    bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.9})
+    bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
 
 
 @configclass
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    terrain_levels = CurrTerm(func=mdp.terrain_levels_new)
+    terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+    # terrain_levels = CurrTerm(func=mdp.terrain_levels_new)
     lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
