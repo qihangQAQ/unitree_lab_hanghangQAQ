@@ -357,9 +357,17 @@ class RewardsCfg:
 
     feet_slide = RewTerm(
         func=mdp.feet_slide,
-        weight=-3.0,
+        weight=-1.5,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+        },
+    )
+
+    feet_air_time_variance = RewTerm(
+        func=mdp.air_time_variance_penalty,
+        weight=-0.5,  # 严厉惩罚不对称
+        params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
