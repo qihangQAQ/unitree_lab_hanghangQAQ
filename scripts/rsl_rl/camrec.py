@@ -53,7 +53,15 @@ simulation_app = app_launcher.app
 
 # 3. 导入依赖库 (在仿真启动后)
 import gymnasium as gym
-from rsl_rl.runners import OnPolicyRunner, NP3ORunner
+
+# 导入 NP3O 扩展包（猴子补丁注入）
+try:
+    import unitree_rl_lab.rsl_rl_ext
+    print("[INFO] NP3O 扩展包已导入，猴子补丁注入完成")
+except ImportError as e:
+    print(f"[WARNING] 无法导入 NP3O 扩展包: {e}")
+
+from rsl_rl.runners import OnPolicyRunner
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
@@ -61,6 +69,22 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils import get_checkpoint_path
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
 import unitree_rl_lab.tasks  # 注册您的自定义任务
+
+# =====================================================================
+# 新增：导入深度图噪声模型
+# 根据你提供的路径 /home/qihang/code_lab/unitree_rl_lab-main/sensor_noise_models/
+# =====================================================================
+import sys
+import os
+# 添加项目根目录到 Python 路径，确保 sensor_noise_models 可导入
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
+try:
+    from sensor_noise_models.depth_noise_model_cfg import DepthCameraNoiseCfg
+    from sensor_noise_models.depth_noise_model import DepthCameraNoise
+except ImportError:
+    print("[ERROR] Cannot import depth noise model. Please ensure 'sensor_noise_models' is in your PYTHONPATH.")
+    sys.exit(1)
 
 
 def main():
@@ -75,25 +99,23 @@ def main():
     )
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
-    # ---------- A) 数据保存目录：固定到 collection_data ----------
+    # ---------- A) 数据保存目录 ----------
     rec_root_path = os.path.join("logs", "rsl_rl", "collection_data")
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     rec_dir = os.path.join(rec_root_path, f"rec_cam_{timestamp}")
     os.makedirs(rec_dir, exist_ok=True)
     print(f"[INFO] Recording data to: {rec_dir}")
 
-    # ---------- B) 模型查找目录：用训练 experiment_name ----------
+    # ---------- B) 模型查找目录 ----------
     ckpt_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     ckpt_root_path = os.path.abspath(ckpt_root_path)
 
-    # Load Checkpoint
     if args_cli.checkpoint:
         resume_path = args_cli.checkpoint
     else:
         resume_path = get_checkpoint_path(ckpt_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-
 
     # Load Environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode=None)
@@ -103,18 +125,17 @@ def main():
 
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    # Load Checkpoint
-    # if args_cli.checkpoint:
-    #     resume_path = args_cli.checkpoint
-    # else:
-    #     resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
-    #
-    # print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-
     # Load Runner
     runner_class_name = getattr(agent_cfg, "class_name", "OnPolicyRunner")
     if runner_class_name == "NP3ORunner":
-        runner = NP3ORunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        try:
+            # 首先尝试从 rsl_rl.runners 导入（猴子补丁注入后可用）
+            from rsl_rl.runners import NP3ORunner
+            runner = NP3ORunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        except (ImportError, NameError):
+            # 如果猴子补丁失败，从扩展包直接导入
+            from unitree_rl_lab.rsl_rl_ext import NP3ORunner as NP3ORunnerExt
+            runner = NP3ORunnerExt(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
 
@@ -126,18 +147,23 @@ def main():
     if isinstance(obs, tuple):
         obs, _ = obs
 
-    labels = {}  # 内存中只存标签（很小），图片实时存硬盘
+    labels = {}  
     total_steps = args_cli.max_steps
     save_interval = args_cli.save_interval
     unwrapped_env = env.unwrapped
 
-    # 统计计数
+    # =====================================================================
+    # 新增：初始化噪声注入器
+    # =====================================================================
+    noise_cfg = DepthCameraNoiseCfg()
+    noise_cfg.far_plane = 6.0  # 与你环境配置的最大探测距离保持一致
+    depth_noise_injector = DepthCameraNoise(cfg=noise_cfg, device=env.unwrapped.device)
+    print(f"[INFO] Depth Camera Noise Model initialized.")
+
     files_saved_count = 0
 
     print(f"\n{'=' * 60}")
     print(f"[START] Starting REAL-TIME recording loop...")
-    print(f"[CONFIG] Target Steps: {total_steps} | Interval: {save_interval}")
-    print(f"[MODE] Headless Safe Mode (Saving directly to disk)")
     print(f"{'=' * 60}\n")
 
     with torch.inference_mode():
@@ -146,19 +172,32 @@ def main():
             actions = policy(obs)
             obs, _, _, _ = env.step(actions)
 
-            # 2. Sampling & Saving (实时写入)
+            # 2. Sampling & Saving
             if i % save_interval == 0:
                 try:
-                    # A. 获取数据
+                    # A. 获取完美的深度数据
                     depth_data = unwrapped_env.scene.sensors["depth_camera"].data.output["distance_to_image_plane"]
-                    # 替换 Inf
-                    depth_data[depth_data == float('inf')] = 0.0
+                    
+                    # 预处理：将无穷大(Inf)或无效值替换为最大探测距离，防止噪声模型报错
+                    depth_data[depth_data == float('inf')] = noise_cfg.far_plane
+                    depth_data[torch.isnan(depth_data)] = noise_cfg.far_plane
 
+                    # 获取射线标签
                     pos_cmd_term = unwrapped_env.command_manager.get_term("position")
                     ray_data = pos_cmd_term.ray_obs
 
-                    # B. 转 Numpy (此时会同步阻塞，这是预期的)
-                    cam_data_np = depth_data.cpu().numpy()
+                    # =========================================================
+                    # B. 注入真实噪声 (核心修改)
+                    # =========================================================
+                    # 确保维度是 (Batch, Channel, Height, Width) -> (num_envs, 1, 90, 160)
+                    if depth_data.ndim == 3:
+                        depth_data = depth_data.unsqueeze(1)
+                    
+                    # 调用 ETHZ 噪声模型
+                    noisy_depth_data = depth_noise_injector(depth_data)
+
+                    # 转 Numpy (去掉 Channel 维度，恢复成 N, H, W)
+                    cam_data_np = noisy_depth_data.squeeze(1).cpu().numpy()
                     ray_label_np = ray_data.cpu().numpy()
 
                     # C. 实时写入硬盘
@@ -168,16 +207,13 @@ def main():
                         # 存标签到字典
                         labels[save_name] = ray_label_np[robot_idx]
 
-                        # 存图片到硬盘
+                        # 存带有真实噪声的图片到硬盘
                         save_path = os.path.join(rec_dir, save_name + '.npy')
                         np.save(save_path, cam_data_np[robot_idx])
 
                         files_saved_count += 1
 
-                    # D. 打印日志 (重要：Headless模式下让你知道它在动)
-                    # \r 可以覆盖上一行，保持清爽，或者直接 print 刷屏
-                    print(
-                        f"  >>> [SAVED] Step {i:04d}/{total_steps} | Saved {args_cli.num_envs} images | Total Files: {files_saved_count}")
+                    print(f"  >>> [SAVED] Step {i:04d}/{total_steps} | Saved {args_cli.num_envs} noisy images | Total Files: {files_saved_count}")
 
                 except KeyError:
                     print(f"[ERROR] Step {i}: Sensors data missing.")
@@ -195,12 +231,9 @@ def main():
         pickle.dump(labels, f)
 
     print(f"[SUCCESS] All done.")
-    print(f"  - Images: {files_saved_count} in {rec_dir}")
-    print(f"  - Labels: {label_path}")
     print(f"{'=' * 60}")
 
     env.close()
-
 
 if __name__ == "__main__":
     main()

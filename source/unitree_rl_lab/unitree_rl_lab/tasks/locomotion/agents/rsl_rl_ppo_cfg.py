@@ -11,8 +11,8 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     # ============== 新增wandb ===========
-    logger = "wandb"                            # ← 开启 wandb
-    wandb_project = "Unitree_g1_Hand_tracking"       # ← wandb 项目名
+    logger = "wandb"                                   # ← 开启 wandb
+    wandb_project = "Unitree_g1_Position"         # ← wandb 项目名
     run_name = "hanghangQAQ"                           # ← 自定义 run 名
     # ===================================
     
@@ -41,3 +41,17 @@ class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,# 期望的 KL 散度 (配合 adaptive 使用，若实际 KL 超过此值则降低学习率)
         max_grad_norm=1.0,# 梯度裁剪阈值 (防止梯度数值爆炸导致训练崩溃)
     )
+
+
+@configclass
+class DataCollectionPPORunnerCfg(BasePPORunnerCfg):
+    """专门用于数据收集的配置，复用已有的标准位置任务模型"""
+
+    # 复用已有的标准位置任务实验名称
+    experiment_name = "unitree_g1_29dof_position"
+
+    # ================= 覆盖父类的设置，关闭 wandb =================
+    logger = "tensorboard"      # 强行把日志记录器改回本地的 tensorboard (填 "none" 也可以完全关闭)
+    wandb_project = ""          # 置空
+    run_name = "data_collection" # 随便改个名字，防止它覆盖你原本训练的文件夹
+    # ==============================================================

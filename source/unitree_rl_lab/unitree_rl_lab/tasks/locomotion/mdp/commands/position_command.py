@@ -737,3 +737,158 @@ class UniformPositionCommandCfg(CommandTermCfg):
     ranges: Ranges = MISSING
 
     limit_ranges: UniformPositionCommandCfg.Ranges = MISSING
+
+
+# =====================================================================
+# 以下是为数据收集专门编写的子类：物理射线位置命令
+# =====================================================================
+
+class MathRayDataCollectionCommand(UniformPositionCommand):
+    """
+    数据收集（Rollout）阶段的命令生成器。
+    核心逻辑：保持复杂的家具模型用于深度相机拍摄，但使用底层的数学公式（圆柱近似）计算射线真值。
+    """
+    def _resample_command(self, env_ids: Sequence[int]):
+        """覆盖父类方法：专为复杂障碍物定制的重采样逻辑"""
+        num = len(env_ids)
+        if num == 0: return
+
+        # 1. 采样基础位置和朝向
+        pos1 = torch.empty(num, 1, device=self.device).uniform_(*self.cfg.ranges.pos_1)
+        pos2 = torch.empty(num, 1, device=self.device).uniform_(*self.cfg.ranges.pos_2)
+
+        root_pos_w = self.robot.data.root_pos_w[env_ids].clone()
+        env_origins = root_pos_w.clone()
+
+        target_pos_w = torch.zeros(num, 3, device=self.device)
+        target_pos_w[:, 0] = env_origins[:, 0] + pos1.squeeze()
+        target_pos_w[:, 1] = env_origins[:, 1] + pos2.squeeze()
+        target_pos_w[:, 2] = env_origins[:, 2]
+        self.position_targets[env_ids] = target_pos_w
+
+        pos_diff = self.position_targets[env_ids] - root_pos_w[:, :3]
+        base_heading = torch.atan2(pos_diff[:, 1], pos_diff[:, 0])
+        self.heading_target[env_ids] = math_utils.wrap_to_pi(base_heading)
+
+        # 2. 障碍物高级生成逻辑
+        obs_names = [
+            "obstacle_table", "obstacle_cabinet", "obstacle_block",
+            "obstacle_cone", "obstacle_capsule", "obstacle_sphere"
+        ]
+        AVG_OBS_RADIUS = 0.4 
+
+        for name in obs_names:
+            if name not in self._env.scene.keys(): continue
+            obj = self._env.scene[name]
+
+            prob = torch.rand(num, device=self.device)
+            final_pos_2d = torch.zeros(num, 2, device=self.device)
+
+            mask_off = prob < 0.2
+            if mask_off.any():
+                n_off = mask_off.sum()
+                final_pos_2d[mask_off, 0] = (torch.rand(n_off, device=self.device) * 24.0) - 2.0
+                final_pos_2d[mask_off, 1] = (torch.rand(n_off, device=self.device) * 12.0) - 6.0
+
+            mask_on_path = ~mask_off 
+            if mask_on_path.any():
+                n_on = mask_on_path.sum()
+                t = torch.rand(n_on, 1, device=self.device) * 0.6 + 0.2
+                
+                start_p = env_origins[mask_on_path, :2]
+                end_p = target_pos_w[mask_on_path, :2]
+                path_vec = end_p - start_p
+                base_pos = start_p + path_vec * t
+
+                path_len = torch.norm(path_vec, dim=1, keepdim=True) + 1e-6
+                normal_vec = torch.cat([-path_vec[:, 1:2], path_vec[:, 0:1]], dim=1) / path_len
+
+                probs_on = prob[mask_on_path]
+                is_full = probs_on < 0.4  
+
+                offset_mag = torch.where(
+                    is_full, torch.zeros_like(probs_on), torch.tensor(AVG_OBS_RADIUS + 0.1, device=self.device) 
+                )
+                offset_mag += (torch.rand_like(probs_on) - 0.5) * 0.2
+                sign = torch.sign(torch.rand_like(probs_on) - 0.5)
+                offset_vec = normal_vec * (offset_mag * sign).unsqueeze(1)
+                
+                final_pos_2d[mask_on_path] = base_pos + offset_vec
+
+            # 安全区检查
+            dist_to_robot = torch.norm(final_pos_2d - env_origins[:, :2], dim=1)
+            is_unsafe = dist_to_robot < 2.0
+            if is_unsafe.any():
+                n_unsafe = is_unsafe.sum()
+                final_pos_2d[is_unsafe, 0] = (torch.rand(n_unsafe, device=self.device) * 24.0) - 2.0
+                final_pos_2d[is_unsafe, 1] = (torch.rand(n_unsafe, device=self.device) * 12.0) - 6.0
+
+            root_state = obj.data.default_root_state[env_ids].clone()
+            root_state[:, 0] = final_pos_2d[:, 0]
+            root_state[:, 1] = final_pos_2d[:, 1]
+            root_state[:, 2] = env_origins[:, 2] + 0.5
+            obj.write_root_state_to_sim(root_state, env_ids=env_ids)
+
+        self._debug_vis_callback()
+        self._debug_vis_heading_callback()
+
+    def _update_command(self):
+        """核心：用数学模型 (circle_ray_query) 强行计算复杂物体的近似距离"""
+        # 1. 基础命令更新
+        env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
+        root_pos_w = self.robot.data.root_pos_w[env_ids, :3]
+        root_quat_w = self.robot.data.root_quat_w[env_ids]
+        
+        pos_diff_w = self.position_targets[env_ids] - root_pos_w
+        self.pos_command_b[env_ids, 0:2] = math_utils.quat_apply_inverse(root_quat_w, pos_diff_w)[:, 0:2]
+        self.pos_command_b[env_ids, 2] = math_utils.wrap_to_pi(self.heading_target[env_ids] - self.robot.data.heading_w[env_ids])
+        
+        standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
+        self.pos_command_b[standing_env_ids, :] = 0.0
+
+        # 2. 【回归数学本质】将所有复杂物体视为圆柱体，手算射线
+        self.ray_obs[:] = self.ray_max_dist
+        obs_names = [
+            "obstacle_table", "obstacle_cabinet", "obstacle_block",
+            "obstacle_cone", "obstacle_capsule", "obstacle_sphere"
+        ]
+        
+        for name in obs_names:
+            if name not in self._env.scene.keys(): continue
+            obj = self._env.scene[name]
+
+            # 获取物体在机器人基座坐标系下的相对位置
+            obj_pos_w = obj.data.root_pos_w[:, :3]
+            obj_rel_pos_b = math_utils.quat_apply_inverse(root_quat_w, obj_pos_w - root_pos_w)
+
+            # 根据物体类型，分配一个“近似半径”给数学公式
+            if "table" in name or "cabinet" in name:
+                math_radius = 0.45  # 大物体给大半径
+            elif "sphere" in name:
+                math_radius = 0.45
+            else:
+                math_radius = 0.35  # 小物体给小半径
+
+            # 强行调用你原版的数学公式算距离
+            dist = self.circle_ray_query(
+                self.ray_x0, self.ray_y0,
+                self.ray_thetas,
+                obj_rel_pos_b[:, :2],
+                math_radius,
+                self.ray_max_dist
+            )
+            # 维护最近距离
+            self.ray_obs = torch.minimum(self.ray_obs, dist)
+
+        # 3. 开启蓝球显示
+        self._use_nn_vis = False 
+        self._debug_vis_rays_callback()
+
+
+@configclass
+class MathRayDataCollectionCommandCfg(UniformPositionCommandCfg):
+    """
+    配置类：用来告诉 Isaac Lab 实例化上面的那个新子类。
+    继承自 UniformPositionCommandCfg，只需要修改 class_type 即可！
+    """
+    class_type = MathRayDataCollectionCommand

@@ -837,3 +837,175 @@ class RobotNP3OPlayEnvCfg(RobotNP3OEnvCfg):
             "y": (0.0, 0.0),
             "yaw": (-3.14, 3.14),
         }
+
+
+
+# =========================================================================
+# 数据收集阶段 (Rollout) 专属配置
+# 结合真实的深度相机和物理射线，取消一切训练用简单障碍物
+# =========================================================================
+
+@configclass
+class RobotDataCollectionSceneCfg(RobotSceneCfg):
+    """专门用于数据收集的场景配置，包含真实传感器和复杂的静态障碍物"""
+    
+    # 1. 禁用原有的简单几何刚体（不再需要用来训练 RL）
+    obstacle_box_0 = None
+    obstacle_cylinder_0 = None
+    obstacle_cylinder_1 = None
+    obstacle_cylinder_2 = None
+    obstacle_sphere_0 = None
+    obstacle_cone_0 = None
+
+    # =====================================================================
+    # 2. 多样化静态障碍物矩阵 (注意前缀均为 Obstacle_ 以便射线正则匹配)
+    # =====================================================================
+
+    # [种类 1: 复杂镂空结构] - 工作台
+    obstacle_table = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_PackingTable",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/PackingTable/packing_table.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
+    # [种类 2: 大面积垂直平面] - 柜子
+    obstacle_cabinet = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Cabinet",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.6, 1.0, 1.8),  # (长, 宽, 高) 模拟一个 1.8米高的大衣柜
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.4, 0.3)), # 类似木头的棕色
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
+    # [种类 3: 低矮直角几何] - 单一方块 (DexCube)
+    obstacle_block = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_DexCube",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
+    # [种类 4: 倾斜平面] - 纯正的圆锥 (完美还原原版论文要素)
+    # 注意：不加 rigid_props，它就是一个纯静态的碰撞网格，不会消耗物理算力
+    obstacle_cone = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Cone",
+        spawn=sim_utils.ConeCfg(
+            radius=0.4, height=0.9,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.3, 0.1)), 
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
+    # [种类 5: 垂直平滑曲面] - 胶囊体 (完美平替 行人 / 高大花瓶)
+    obstacle_capsule = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Capsule",
+        spawn=sim_utils.CapsuleCfg(
+            radius=0.3, height=1.2,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.6, 0.8)), 
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
+    # [种类 6: 全向平滑曲面] - 大球体 (平替 矮胖型花瓶 / 健身球)
+    obstacle_sphere = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Sphere",
+        spawn=sim_utils.SphereCfg(
+            radius=0.45,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.8, 0.4)), 
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
+    # # [种类 7: 极端内凹几何] - 圆环 (模拟凳子腿、轮胎、异形障碍，极其考验深度图感知)
+    # obstacle_torus = AssetBaseCfg(
+    #     prim_path="{ENV_REGEX_NS}/Obstacle_Torus",
+    #     spawn=sim_utils.TorusCfg(
+    #         radius=0.4, tube_radius=0.15,
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.7, 0.2, 0.7)), 
+    #     ),
+    #     # 初始时让它立起来 (绕X轴旋转90度)
+    #     init_state=AssetBaseCfg.InitialStateCfg(
+    #         pos=(1000.0, 0.0, -10.0), 
+    #         rot=(0.707, 0.707, 0.0, 0.0) 
+    #     ),
+    # )
+    
+
+    # 3. 深度相机配置 (输出干净深度图，供 camrec.py 脚本注入真实噪声)
+    depth_camera = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/torso_link/depth_cam",
+        update_period=0.1, # 10Hz
+        height=80,         # 对应 160x90 分辨率
+        width=160,
+        data_types=["distance_to_image_plane"],
+        spawn=PinholeCameraCfg(
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 8.0), # far_plane 设置为 8.0m
+        ),
+        offset=CameraCfg.OffsetCfg(
+            pos=(0.25, 0.0, 0.2), # 根据你的宇树G1胸部位置微调
+            rot=(1.0, 0.0, 0.0, 0.0),
+            convention="world",
+        ),
+    )
+
+
+
+@configclass
+class RobotDataCollectionEnvCfg(RobotEnvCfg):
+    """
+    专门用于数据收集的顶层环境配置。
+    直接继承基础的 RobotEnvCfg，并替换场景和 Command。
+    """
+    # 替换场景为刚刚定义的数据收集专属场景
+    scene: RobotDataCollectionSceneCfg = RobotDataCollectionSceneCfg(num_envs=9, env_spacing=2.5)
+
+    def __post_init__(self):
+        super().__post_init__()
+        
+        # 1. 确保在使用相机和物理射线时，传感器的更新频率与渲染/物理步长同步
+        self.scene.depth_camera.update_period = self.sim.dt * self.decimation
+        # self.scene.raycaster_11.update_period = self.sim.dt * self.decimation
+        
+        # 2. 数据收集阶段不需要课程学习
+        self.curriculum = None
+
+        # 3. 扰关闭推力干 (保证收集的数据平稳，防止机器人走着走着被推倒导致数据跳变)
+        self.events.push_robot = None
+
+        # =================================================================
+        # 4. 【核心切换】用带有物理射线的 CommandCfg 覆盖掉原本的数学射线配置
+        # 这样底层的命令类就会实例化我们刚写的 PhysicalRayPositionCommand
+        # =================================================================
+        old_ranges = self.commands.position.ranges
+        old_limit_ranges = self.commands.position.limit_ranges
+        old_max_goal_time = self.commands.position.max_goal_time_s
+        old_resampling_time = self.commands.position.resampling_time_range
+        
+        self.commands.position = mdp.MathRayDataCollectionCommandCfg(
+            asset_name="robot",
+            resampling_time_range=old_resampling_time,
+            ranges=old_ranges,
+            limit_ranges=old_limit_ranges,
+            max_goal_time_s=old_max_goal_time,
+            randomize_goal_time_minus_s=3.0
+        )

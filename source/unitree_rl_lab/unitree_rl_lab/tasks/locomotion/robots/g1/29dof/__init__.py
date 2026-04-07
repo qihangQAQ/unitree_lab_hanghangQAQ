@@ -50,3 +50,15 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BasePPORunnerCfg",
     },
 )
+
+# 数据收集专用任务
+gym.register(
+    id="Unitree-G1-29dof-Position-DataCollection",
+    entry_point=f"{__name__}.position_env:LeggedRobotPosEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.position_env_cfg:RobotDataCollectionEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.position_env_cfg:RobotDataCollectionEnvCfg",
+        "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:DataCollectionPPORunnerCfg",
+    },
+)
