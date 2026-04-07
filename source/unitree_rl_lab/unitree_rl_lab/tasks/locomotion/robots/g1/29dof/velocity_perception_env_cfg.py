@@ -353,7 +353,7 @@ class RewardsCfg:
     # 惩罚关节加速度的平方和，抑制关节运动的突变。
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     # 惩罚动作的变化率，促使控制信号平滑。
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.00)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.02)
     # 惩罚关节位置超出软限位的程度，保护机械结构。
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
     # 惩罚能量消耗（关节速度与力矩乘积的绝对值之和）。
@@ -362,7 +362,7 @@ class RewardsCfg:
     # 惩罚手臂关节偏离默认位置（L1偏差），鼓励回到中立姿态。
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.1,
+        weight=-0.5,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
