@@ -79,7 +79,7 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         ),
         # 5. 平地保持不变
         "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
-        不规则地面地形（坑洼）
+        # 不规则地面地形（坑洼）
         "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
             proportion=0.1,
             noise_range=(0.0, 0.05),   # 最大 8cm 凹凸
@@ -92,12 +92,12 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         #     grid_height_range=(0.0, 0.25),
         # ),
 
-        # # 坡度地形
-        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-        #     proportion=0.05,
-        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
-        #     platform_width=3.0,
-        # ),
+        # 坡度地形
+        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.05,
+            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+            platform_width=3.0,
+        ),
         # "pit": terrain_gen.MeshPitTerrainCfg(
         #     proportion=0.05,
         #     pit_depth_range=(0.3, 0.5), # 坑深 30‑50cm
@@ -356,7 +356,7 @@ class RewardsCfg:
     # 惩罚手臂关节偏离默认位置（L1偏差），鼓励回到中立姿态。
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.1,
+        weight=-0.5,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
@@ -392,7 +392,7 @@ class RewardsCfg:
     # 惩罚基座倾斜，通过重力投影在水平面的分量鼓励保持直立。
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
     # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
+    # base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
 
     # -- feet
     # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
