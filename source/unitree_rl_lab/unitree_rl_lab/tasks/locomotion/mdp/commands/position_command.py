@@ -265,8 +265,12 @@ class UniformPositionCommand(CommandTerm):
         self.heading_target[env_ids] = math_utils.wrap_to_pi(base_heading)
 
         # 4. 障碍物高级生成逻辑 (含 2m 安全区检测)
-        obs_names = ["obstacle_box_0", "obstacle_cylinder_0","obstacle_cylinder_1"
-                     "obstacle_cylinder_2","obstacle_sphere_0","obstacle_cone_0"]
+        # obs_names = ["obstacle_box_0", "obstacle_cylinder_0","obstacle_cylinder_1"
+        #              "obstacle_cylinder_2","obstacle_sphere_0","obstacle_cone_0"]
+        obs_names = [
+            "obstacle_table", "obstacle_cabinet", "obstacle_block",
+            "obstacle_cone", "obstacle_capsule", "obstacle_sphere"
+        ]
 
         # 预估一个通用的障碍物半径 (用于计算偏移量)，取平均值约 0.35m
         AVG_OBS_RADIUS = 0.35
@@ -479,10 +483,14 @@ class UniformPositionCommand(CommandTerm):
             self.ray_obs[:] = self.ray_max_dist
 
             # B-2. 定义要检测的障碍物列表 (需与 env_cfg 里的名字一致)
+            # obs_names = [
+            #     "obstacle_box_0",
+            #     "obstacle_cylinder_0", "obstacle_cylinder_1", "obstacle_cylinder_2",
+            #     "obstacle_sphere_0", "obstacle_cone_0"
+            # ]
             obs_names = [
-                "obstacle_box_0",
-                "obstacle_cylinder_0", "obstacle_cylinder_1", "obstacle_cylinder_2",
-                "obstacle_sphere_0", "obstacle_cone_0"
+            "obstacle_table", "obstacle_cabinet", "obstacle_block",
+            "obstacle_cone", "obstacle_capsule", "obstacle_sphere"
             ]
 
             # B-3. 遍历障碍物计算交点

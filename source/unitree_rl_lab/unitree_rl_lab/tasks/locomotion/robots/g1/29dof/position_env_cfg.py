@@ -94,73 +94,145 @@ class RobotSceneCfg(InteractiveSceneCfg):
     )
 
     # 障碍设置
-    # ================= 1. 一个长方体 (Box) =================
-    obstacle_box_0 = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Box_0",
-        spawn=sim_utils.CuboidCfg(
-            size=(1.0, 0.2, 0.5), # 比如这是一个横着的长条
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    # # ================= 1. 一个长方体 (Box) =================
+    # obstacle_box_0 = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Box_0",
+    #     spawn=sim_utils.CuboidCfg(
+    #         size=(1.0, 0.2, 0.5), # 比如这是一个横着的长条
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)), # 红
+    #     ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)), # 初始先扔远点，等 reset 再拉回来
+    # )
+
+    # # ================= 2. 圆柱体 (Cylinder)  =================
+    # obstacle_cylinder_0 = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Cylinder_0",
+    #     spawn=sim_utils.CylinderCfg(
+    #         radius=0.25, height=0.8,
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.8, 0.1)), # 黄
+    #     ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    # )
+    # # ================= 3. 圆柱体 (Cylinder)  =================
+    # obstacle_cylinder_1 = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Cylinder_1",
+    #     spawn=sim_utils.CylinderCfg(
+    #         radius=0.35, height=0.6,
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.8, 0.1)),
+    #     ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    # )
+    # # 4. Cylinder (细高圆柱)
+    # obstacle_cylinder_2 = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Cylinder_2",
+    #     spawn=sim_utils.CylinderCfg(
+    #         radius=0.15, height=1.0,
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.7, 0.8, 0.2)),
+    #     ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    # )
+    # # 5. Sphere (球体)
+    # obstacle_sphere_0 = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Sphere_0",
+    #     spawn=sim_utils.SphereCfg(
+    #         radius=0.35,
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.8, 0.2)),  # 绿
+    #     ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    # )
+    # # 6. Cone (圆锥体)
+    # obstacle_cone_0 = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Cone_0",
+    #     spawn=sim_utils.ConeCfg(
+    #         radius=0.35, height=0.8,
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.2, 0.8)),  # 蓝
+    #     ),
+    #     init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    # )
+    # 复杂障碍设置
+    # [种类 1: 复杂镂空结构] - 工作台
+    obstacle_table = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_PackingTable",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/PackingTable/packing_table.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)), # 红
         ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)), # 初始先扔远点，等 reset 再拉回来
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
     )
 
-    # ================= 2. 圆柱体 (Cylinder)  =================
-    obstacle_cylinder_0 = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Cylinder_0",
-        spawn=sim_utils.CylinderCfg(
-            radius=0.25, height=0.8,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+    # [种类 2: 大面积垂直平面] - 柜子
+    obstacle_cabinet = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Cabinet",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.6, 1.0, 1.8),  # (长, 宽, 高) 模拟一个 1.8米高的大衣柜
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.8, 0.1)), # 黄
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.4, 0.3)), # 类似木头的棕色
         ),
         init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
     )
-    # ================= 3. 圆柱体 (Cylinder)  =================
-    obstacle_cylinder_1 = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Cylinder_1",
-        spawn=sim_utils.CylinderCfg(
-            radius=0.35, height=0.6,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+
+    # [种类 3: 低矮直角几何] - 单一方块 (DexCube)
+    obstacle_block = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_DexCube",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.8, 0.1)),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
     )
-    # 4. Cylinder (细高圆柱)
-    obstacle_cylinder_2 = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Cylinder_2",
-        spawn=sim_utils.CylinderCfg(
-            radius=0.15, height=1.0,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.7, 0.8, 0.2)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
-    )
-    # 5. Sphere (球体)
-    obstacle_sphere_0 = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Sphere_0",
-        spawn=sim_utils.SphereCfg(
-            radius=0.35,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.8, 0.2)),  # 绿
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
-    )
-    # 6. Cone (圆锥体)
-    obstacle_cone_0 = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Cone_0",
+
+    # [种类 4: 倾斜平面] - 纯正的圆锥 (完美还原原版论文要素)
+    # 注意：不加 rigid_props，它就是一个纯静态的碰撞网格，不会消耗物理算力
+    obstacle_cone = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Cone",
         spawn=sim_utils.ConeCfg(
-            radius=0.35, height=0.8,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            radius=0.4, height=0.9,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
             collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.1, 0.2, 0.8)),  # 蓝
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.3, 0.1)), 
         ),
         init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
     )
+
+    # [种类 5: 垂直平滑曲面] - 胶囊体 (完美平替 行人 / 高大花瓶)
+    obstacle_capsule = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Capsule",
+        spawn=sim_utils.CapsuleCfg(
+            radius=0.3, height=1.2,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.6, 0.8)), 
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+
+    # [种类 6: 全向平滑曲面] - 大球体 (平替 矮胖型花瓶 / 健身球)
+    obstacle_sphere = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Obstacle_Sphere",
+        spawn=sim_utils.SphereCfg(
+            radius=0.45,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.8, 0.4)), 
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(1000.0, 0.0, -10.0)),
+    )
+    
     # # ================= 深度相机配置 =================
     # depth_camera = CameraCfg(
     #     # 1. 修改挂载点为 torso_link
