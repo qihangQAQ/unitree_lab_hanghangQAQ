@@ -53,22 +53,22 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             step_width=0.3,
             platform_width=3.0,
         ),
-        # 2. 离散障碍物
-        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-            proportion=0.2,
-            horizontal_scale=0.1,
-            vertical_scale=0.005,
-            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
-            obstacle_width_range=(1.0, 2.0),
-            num_obstacles=40,
-        ),
-        # 3. 标准阶梯
-        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.2), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0
-        ),
+        # # 2. 离散障碍物（离散障碍的雏形 -- 小台阶）
+        # # "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+        # #     proportion=0.2,
+        # #     horizontal_scale=0.1,
+        # #     vertical_scale=0.005,
+        # #     obstacle_height_range=(0.0, 0.2), # 👈 目前最高只有 20cm
+        # #     obstacle_width_range=(1.0, 2.0),  # 👈 宽度1到2米，像个宽大的台阶
+        # #     num_obstacles=40,
+        # # ),
+        # # # 3. 标准阶梯
+        # # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        # #     proportion=0.2,
+        # #     step_height_range=(0.0, 0.2), # 下界改为 0.0
+        # #     step_width=0.3,
+        # #     platform_width=3.0
+        # # ),
         # 4. 坑洼/波浪地面
         "random_rough": terrain_gen.HfWaveTerrainCfg(
             proportion=0.2,
@@ -85,12 +85,12 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             noise_range=(0.0, 0.06),   # 最大 8cm 凹凸
             noise_step=0.02,
         ),
-        # 不规则高低地形（台阶）
-        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
-            proportion=0.05,
-            grid_width=0.49,
-            grid_height_range=(0.0, 0.1),
-        ),
+        # # 不规则高低地形（台阶）
+        # "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+        #     proportion=0.05,
+        #     grid_width=0.49,
+        #     grid_height_range=(0.0, 0.1),
+        # ),
 
         # 坡度地形
         "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
@@ -98,6 +98,41 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
             platform_width=3.0,
         ),
+
+        # 障碍地形
+        # -----------------  离散障碍  --------------------
+        # 2. 离散障碍物
+        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            # 把高度拉高到 0.8米 ~ 1.5米，甚至更高。超过机器人的跨越极限，它就只能绕路。
+            obstacle_height_range=(0.8, 1.5), 
+            # 把宽度收窄到 0.4米 ~ 0.8米，让它看起来像柱子或大箱子，给机器人留出绕行的通道。
+            obstacle_width_range=(0.4, 0.8),
+            # 控制密度。在 8x8 的格子里放太多可能变成死胡同，可以适当调小数量。
+            num_obstacles=15,
+        ),
+        # --------------------------------------------------
+
+        # -----------------  迷宫/墙壁地形  --------------------
+        "maze_walls": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            # 高度设置为 1.0 ~ 1.5 米，彻底断绝跨越的念想
+            obstacle_height_range=(1.0, 1.5), 
+            # 🔥 核心：把宽度拉大到 1.5 ~ 3.0 米，原本的“柱子”就变成了“墙壁”
+            obstacle_width_range=(0.5, 1.5),
+            # 数量放个 12~15 面墙，在 8x8 的地图上会形成非常复杂的错落走廊
+            num_obstacles=15, 
+            # 保证出生点周围有 2 米的空地，防止一出生就卡在墙里
+            platform_width=2.0, 
+            # "choice"（默认值）： 底层会执行类似 random.choice([-1, 1]) 的操作。随到 1 就是墙，随到 -1 就是深坑。
+            # "fixed"： 底层会直接使用你设置的 obstacle_height_range（正数），不再做符号翻转！
+            obstacle_height_mode="fixed", # 👈 必须改成 "fixed"，这样就只有平地起的高墙了
+        ),
+        # --------------------------------------------------
     },
 )
 
@@ -135,7 +170,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/torso_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[3.0, 2.0]),
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
@@ -282,7 +317,7 @@ class ObservationsCfg:
                 "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
             },
             scale = 1.0,
-            clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
+            clip=(-1.5, 1.5),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
             noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
         )
 
@@ -314,9 +349,12 @@ class ObservationsCfg:
                 "sensor_cfg": SceneEntityCfg("height_scanner"),
                 "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
             },
+            # 缩放比例（函数算出来的原始结果乘上这个数）
             scale = 1.0,
+            # (数值截断/限制)
             clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
-            noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
+            # 观测噪声（函数算出来的结果基础上加上这个噪声）
+            noise=Unoise(n_min=-0.1, n_max=0.1) 
         )
 
 
@@ -483,12 +521,26 @@ class RewardsCfg:
 
 
     # 惩罚除脚踝外其他身体部位与地面的接触，避免意外碰撞。
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1,
+    # undesired_contacts = RewTerm(
+    #     func=mdp.undesired_contacts,
+    #     weight=-1,
+    #     params={
+    #         "threshold": 1,
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+    #     },
+    # )
+
+    body_collision = RewTerm(
+        func=mdp.body_collision_shaping_reward, # 指向上面写的函数
+        weight=-4.0, # 给予较大的负权重
         params={
-            "threshold": 1,
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces", 
+                # 这里是精髓：利用正则选中 pelvis, waist, torso, hip, shoulder, elbow
+                # 坚决不选任何包含 knee 或 ankle 的 Link
+                body_names=["pelvis", "waist.*", "torso.*", ".*_hip_.*", ".*_shoulder_.*", ".*_elbow_.*"]
+            ),
+            "threshold": 1.0, # 超过 1.0N 的力才开始计入惩罚
         },
     )
 
@@ -500,6 +552,16 @@ class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.2})
     bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
+    base_collision_death = DoneTerm(
+        func=mdp.illegal_contact_complex, # 指向上面写的函数
+        params={
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces", 
+                body_names=["pelvis", "waist.*", "torso.*", ".*_hip_.*", ".*_shoulder_.*", ".*_elbow_.*"]
+            ),
+            "threshold": 25.0, # 死亡阈值可以设置得比 Reward 稍微高一点（比如10N），给机器人一点容错调整空间
+        },
+    )
 
 
 @configclass

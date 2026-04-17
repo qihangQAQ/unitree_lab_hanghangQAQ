@@ -1141,3 +1141,19 @@ def feet_contact_force_penalty(
 
     # 归一化到相对稳定的量级，方便配 weight
     return torch.sum(excess, dim=1) / max_excess
+
+def body_collision_shaping_reward(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, threshold: float = 0.1) -> torch.Tensor:
+    """
+    针对核心部位碰撞的惩罚。
+    使用平滑的惩罚机制：只要检测到碰撞力，就根据力度大小进行阶梯式扣分。
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    
+    # 获取当前帧的接触力模长 (num_envs, num_bodies)
+    force_mag = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
+    
+    # 统计有多少个部位发生了有效碰撞（超过极小阈值 0.1N 就算触碰）
+    collision_counts = torch.sum(force_mag > threshold, dim=1).float()
+    
+    # 返回负值作为惩罚
+    return -collision_counts
