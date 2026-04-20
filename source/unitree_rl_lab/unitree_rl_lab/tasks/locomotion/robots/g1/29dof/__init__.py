@@ -11,6 +11,19 @@ gym.register(
     },
 )
 
+gym.register(
+    id="Unitree-G1-29dof-Velocity-Avoidance",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_avoid_env_cfg:RobotAvoidEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_avoid_env_cfg:RobotAvoidPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": (
+            "unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_avoidance_cfg:UnitreeAvoidancePPORunnerCfg"
+        ),
+    },
+)
+
 # 注册位置控制命令
 gym.register(
     id="Unitree-G1-29dof-Position",

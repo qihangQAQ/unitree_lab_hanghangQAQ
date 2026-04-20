@@ -91,11 +91,14 @@ class DepthCameraNoise:
 
     def __call__(self, img: torch.Tensor) -> torch.Tensor:
         # Add noise to the depth image
-        if img.shape[1] != 3 or img.shape[1] != 1:
+        if img.ndim == 3:
+            img = img.unsqueeze(1)
+            dim_move = False
+        elif img.ndim == 4 and img.shape[1] in (1, 3):
+            dim_move = False
+        else:
             img = torch.movedim(img, -1, 1)
             dim_move = True
-        else:
-            dim_move = False
 
         img = self._down_sample(img)
         img = self._edge_noise(img)

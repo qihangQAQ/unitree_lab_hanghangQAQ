@@ -21,14 +21,18 @@ except ImportError as e:
 
 # 导入本地 NP3O 类
 from .algorithms.np3o import NP3O
+from .modules.actor_critic_avoidance import ActorCriticAvoidance
 from .modules.actor_critic_np3o import ActorCriticNP3O
+from .modules.actor_critic_perception import ActorCriticPerception
 from .storage.rollout_storage_np3o import NP3ORolloutStorage
 from .runners.on_policy_runner_np3o import NP3ORunner
 
 # 定义要注入的类映射
 _CLASSES_TO_INJECT = {
     'NP3O': NP3O,
+    'ActorCriticAvoidance': ActorCriticAvoidance,
     'ActorCriticNP3O': ActorCriticNP3O,
+    'ActorCriticPerception': ActorCriticPerception,
     'NP3ORolloutStorage': NP3ORolloutStorage,
     'NP3ORunner': NP3ORunner,
 }
@@ -51,7 +55,9 @@ def inject_classes():
 
         # ActorCriticNP3O -> rsl_rl.modules
         if hasattr(rsl_rl, 'modules'):
+            rsl_rl.modules.ActorCriticAvoidance = ActorCriticAvoidance
             rsl_rl.modules.ActorCriticNP3O = ActorCriticNP3O
+            rsl_rl.modules.ActorCriticPerception = ActorCriticPerception
 
         # NP3ORolloutStorage -> rsl_rl.storage
         if hasattr(rsl_rl, 'storage'):
@@ -63,7 +69,7 @@ def inject_classes():
 
         # 3. 确保这些类也在子模块的 __all__ 列表中（如果存在）
         _update_submodule_all('algorithms', ['NP3O'])
-        _update_submodule_all('modules', ['ActorCriticNP3O'])
+        _update_submodule_all('modules', ['ActorCriticAvoidance', 'ActorCriticNP3O', 'ActorCriticPerception'])
         _update_submodule_all('storage', ['NP3ORolloutStorage'])
         _update_submodule_all('runners', ['NP3ORunner'])
 
@@ -93,10 +99,18 @@ def _update_submodule_all(submodule_name, class_names):
 _injection_successful = inject_classes()
 
 # 导出 NP3O 类
-__all__ = ['NP3O', 'ActorCriticNP3O', 'NP3ORolloutStorage', 'NP3ORunner', 'inject_classes']
+__all__ = [
+    'NP3O',
+    'ActorCriticAvoidance',
+    'ActorCriticNP3O',
+    'ActorCriticPerception',
+    'NP3ORolloutStorage',
+    'NP3ORunner',
+    'inject_classes',
+]
 
 # 重新导出以便直接导入
 from .algorithms import NP3O
-from .modules import ActorCriticNP3O
+from .modules import ActorCriticAvoidance, ActorCriticNP3O, ActorCriticPerception
 from .storage import NP3ORolloutStorage
 from .runners import NP3ORunner

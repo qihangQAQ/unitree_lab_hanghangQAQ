@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 import torch
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
+from isaaclab.managers import SceneEntityCfg
+
+_REPO_ROOT = Path(__file__).resolve().parents[6]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from sensor_noise_models.depth_noise_model import DepthCameraNoise
+from sensor_noise_models.depth_noise_model_cfg import DepthCameraNoiseCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -46,3 +56,54 @@ def ray2d_distances(env: ManagerBasedRLEnv, command_name: str = "position") -> t
     # return torch.log2(ray_obs)
 
     return ray_obs
+
+
+def _get_depth_noise_model(env: ManagerBasedRLEnv, far_plane: float) -> DepthCameraNoise:
+    noise_model = getattr(env, "_depth_camera_noise_model", None)
+    cached_far_plane = getattr(env, "_depth_camera_noise_far_plane", None)
+    if noise_model is None or cached_far_plane != far_plane:
+        noise_cfg = DepthCameraNoiseCfg()
+        noise_cfg.far_plane = far_plane
+        noise_model = DepthCameraNoise(cfg=noise_cfg, device=env.device)
+        env._depth_camera_noise_model = noise_model
+        env._depth_camera_noise_far_plane = far_plane
+    return noise_model
+
+
+def depth_image(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("depth_camera"),
+    far_plane: float = 8.0,
+    flatten: bool = True,
+    use_noise_model: bool = True,
+    normalize: bool = True,
+) -> torch.Tensor:
+    """Return the raw depth image for policy input.
+
+    The image is kept unencoded here. If ``flatten`` is True, the raw depth pixels are
+    flattened so recurrent rsl_rl policies can reshape them internally before CNN encoding.
+    """
+
+    depth_sensor = env.scene.sensors[sensor_cfg.name]
+    raw_depth = depth_sensor.data.output.get("distance_to_image_plane")
+
+    if raw_depth is None:
+        depth = torch.full((env.num_envs, 90, 160), far_plane, device=env.device)
+    else:
+        depth = raw_depth
+        if depth.ndim == 4 and depth.shape[-1] == 1:
+            depth = depth.squeeze(-1)
+        depth = torch.nan_to_num(depth, nan=far_plane, posinf=far_plane, neginf=0.0)
+        depth = torch.clamp(depth, 0.0, far_plane)
+
+    if use_noise_model:
+        noise_model = _get_depth_noise_model(env, far_plane)
+        depth = noise_model(depth.unsqueeze(1)).squeeze(1)
+
+    if normalize:
+        depth = depth / far_plane
+
+    if flatten:
+        depth = depth.flatten(start_dim=1)
+
+    return depth
