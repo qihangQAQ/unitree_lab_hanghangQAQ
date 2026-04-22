@@ -24,6 +24,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
+from unitree_rl_lab.tasks.locomotion.terrains import HfCircularObstaclesTerrainCfg
 
 # 地形生成配置（定义鹅卵石路面）
 COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
@@ -41,6 +42,82 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     },
 )
 
+ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,  
+    num_cols=20,  
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        # # 4. 坑洼/波浪地面
+        # "random_rough": terrain_gen.HfWaveTerrainCfg(
+        #     proportion=0.2,
+        #     horizontal_scale=0.1,
+        #     vertical_scale=0.005,
+        #     amplitude_range=(0.0, 0.05), # 下界改为 0.0
+        #     num_waves=3,
+        # ),
+        # # 5. 平地保持不变
+        # "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
+        # # 不规则地面地形（坑洼）
+        # "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
+        #     proportion=0.1,
+        #     noise_range=(0.0, 0.06),   # 最大 8cm 凹凸
+        #     noise_step=0.02,
+        # ),
+        # # 坡度地形
+        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+        #     proportion=0.05,
+        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+        #     platform_width=3.0,
+        # ),
+
+        # 障碍地形
+        # -----------------  离散障碍  --------------------
+        # 2. 离散障碍物
+        "discrete_obstacles": HfCircularObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            # 把高度拉高到 0.8米 ~ 1.5米，甚至更高。超过机器人的跨越极限，它就只能绕路。
+            obstacle_height_range=(0.8, 1.5), 
+            # 半径 0.2米 ~ 0.4米，对应直径 0.4米 ~ 0.8米。
+            obstacle_radius_range=(0.2, 0.4),
+            # 控制密度。在 8x8 的格子里放太多可能变成死胡同，可以适当调小数量。
+            num_obstacles=15,
+            # 保证出生点周围有 2 米的空地，防止一出生就卡在障碍物里。
+            platform_width=2.0,
+            # "choice"（默认值）： 底层会执行类似 random.choice([-1, 1]) 的操作。
+            # 随到 1 就是障碍，随到 -1 就是坑洞。
+            obstacle_height_mode="fixed",
+        ),
+        # --------------------------------------------------
+
+        # -----------------  迷宫/墙壁地形  --------------------
+        "maze_walls": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            # 高度设置为 1.0 ~ 1.5 米，彻底断绝跨越的念想
+            obstacle_height_range=(1.0, 1.5), 
+            # 🔥 核心：把宽度拉大到 1.5 ~ 3.0 米，原本的“柱子”就变成了“墙壁”
+            obstacle_width_range=(0.5, 1.5),
+            # 数量放个 12~15 面墙，在 8x8 的地图上会形成非常复杂的错落走廊
+            num_obstacles=15, 
+            # 保证出生点周围有 2 米的空地，防止一出生就卡在墙里
+            platform_width=2.0, 
+            # "choice"（默认值）： 底层会执行类似 random.choice([-1, 1]) 的操作。随到 1 就是墙，随到 -1 就是深坑。
+            # "fixed"： 底层会直接使用你设置的 obstacle_height_range（正数），不再做符号翻转！
+            obstacle_height_mode="fixed", # 👈 必须改成 "fixed"，这样就只有平地起的高墙了
+        ),
+        # --------------------------------------------------
+    },
+)
+
+
 
 @configclass
 # 机器人场景配置
@@ -52,8 +129,8 @@ class RobotSceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",    # 地形在场景中的路径
         terrain_type="generator",     # 地形类型：生成器
-        terrain_generator=COBBLESTONE_ROAD_CFG,  # 使用鹅卵石路面生成器
-        max_init_terrain_level=COBBLESTONE_ROAD_CFG.num_rows - 1,
+        terrain_generator=ROUGH_TERRAINS_CFG ,  # 使用鹅卵石路面生成器
+        max_init_terrain_level=0,
         collision_group=-1,           # 碰撞组
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",

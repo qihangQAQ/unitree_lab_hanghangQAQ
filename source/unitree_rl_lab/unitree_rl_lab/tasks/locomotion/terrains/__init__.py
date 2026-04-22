@@ -1,0 +1,2 @@
+from .circular_obstacles import HfCircularObstaclesTerrainCfg
+
