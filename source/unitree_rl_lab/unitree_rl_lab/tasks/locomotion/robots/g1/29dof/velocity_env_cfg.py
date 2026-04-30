@@ -74,15 +74,15 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             proportion=0.2,
             horizontal_scale=0.1,
             vertical_scale=0.005,
-            amplitude_range=(0.0, 0.05), # 下界改为 0.0
+            amplitude_range=(0.0, 0.08), # 下界改为 0.0
             num_waves=3,
         ),
         # 5. 平地保持不变
         "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
-        不规则地面地形（坑洼）
+        # 不规则地面地形（坑洼）
         "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
             proportion=0.1,
-            noise_range=(0.0, 0.05),   # 最大 8cm 凹凸
+            noise_range=(0.0, 0.08),   # 最大 8cm 凹凸
             noise_step=0.02,
         ),
         # # 不规则高低地形（台阶）
@@ -240,7 +240,7 @@ class CommandsCfg:
             lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.2, 0.2)
+            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5)
         ),
     )
 

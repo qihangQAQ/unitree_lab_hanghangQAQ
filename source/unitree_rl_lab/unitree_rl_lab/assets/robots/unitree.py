@@ -17,7 +17,7 @@ from isaaclab.utils import configclass
 
 from unitree_rl_lab.assets.robots import unitree_actuators
 
-UNITREE_MODEL_DIR = "/root/gpufree-data/code/unitree_lab_hanghangQAQ/unitree_model"  # Replace with the actual path to your unitree_model directory
+UNITREE_MODEL_DIR = "/home/qihang/code_lab/unitree_rl_lab-main/unitree_model"  # Replace with the actual path to your unitree_model directory
 UNITREE_ROS_DIR = "path/to/unitree_ros"  # Replace with the actual path to your unitree_ros package
 
 
@@ -513,7 +513,7 @@ UNITREE_G1_29DOF_CFG = UnitreeArticulationCfg(
 
 G1_CFG = UnitreeArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{UNITREE_MODEL_DIR}/G1/29dof/test/test/g1.usd",
+        usd_path=f"{UNITREE_MODEL_DIR}/G1/29dof/test/g1.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,

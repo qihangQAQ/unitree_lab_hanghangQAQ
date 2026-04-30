@@ -61,6 +61,7 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
             obstacle_width_range=(1.0, 2.0),
             num_obstacles=40,
+            obstacle_height_mode="fixed",
         ),
         # 3. 标准阶梯
         "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
@@ -237,7 +238,7 @@ class CommandsCfg:
             lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.2, 0.2)
+            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5)
         ),
     )
 
@@ -331,35 +332,45 @@ class ObservationsCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # -- task
+    # ==========================================
+    # 1. 任务与存活 (Task & Survival)
+    # ==========================================
+    
+    # 鼓励机器人跟踪目标水平面内的线速度指令（X、Y方向）。
     track_lin_vel_xy = RewTerm(
         func=mdp.track_lin_vel_xy_yaw_frame_exp,
         weight=1.0,
         params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
     )
+    
+    # 鼓励机器人跟踪目标偏航角速度指令（Z轴旋转）。
     track_ang_vel_z = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_ang_vel_z_exp, 
+        weight=0.5, 
+        params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
-    # 正向奖励，鼓励机器人保持存活（未触发终止条件）。
+    
+    # 鼓励机器人保持存活状态，避免触发摔倒等终止条件。
     alive = RewTerm(func=mdp.is_alive, weight=0.15)
+    
+    # 强烈惩罚机器人触发回合终止条件，促使其尽可能长时间运行。
+    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
 
-    # -- base
-    # 惩罚基座在Z方向的线速度，防止机器人上下跳动。
+
+    # ==========================================
+    # 2. 基座与姿态 (Base & Posture)
+    # ==========================================
+    
+    # 惩罚基座倾斜，鼓励机器人躯干在水平面上保持直立。
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
+
+    # 惩罚基座在Z方向的线速度，防止机器人行走时上下剧烈跳动。
     base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    # 惩罚基座绕X、Y轴的角速度，抑制俯仰与滚转方向的转动。
+    
+    # 惩罚基座绕X和Y轴的角速度，抑制不必要的俯仰与滚转晃动。
     base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    # 惩罚关节速度的平方和，限制关节转动过快。
-    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
-    # 惩罚关节加速度的平方和，抑制关节运动的突变。
-    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    # 惩罚动作的变化率，促使控制信号平滑。
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.02)
-    # 惩罚关节位置超出软限位的程度，保护机械结构。
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
-    # 惩罚能量消耗（关节速度与力矩乘积的绝对值之和）。
-    energy = RewTerm(func=mdp.energy, weight=-2e-5)
-
-    # 惩罚手臂关节偏离默认位置（L1偏差），鼓励回到中立姿态。
+    
+    # 惩罚手臂关节偏离中立位置，鼓励手臂保持默认姿态。
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-0.5,
@@ -374,7 +385,8 @@ class RewardsCfg:
             )
         },
     )
-    # 惩罚腰部关节偏离默认位置，保持腰部姿态。
+    
+    # 惩罚腰部关节偏离中立位置，保持躯干姿态稳定。
     joint_deviation_waists = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-0.8,
@@ -387,37 +399,44 @@ class RewardsCfg:
             )
         },
     )
-    # 惩罚特定腿部关节（如髋关节）偏离默认位置。
+    
+    # 惩罚特定腿部关节（如髋关节）偏离中立位置，规范腿部运动轨迹。
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-0.2,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
     )
 
-    # -- robot
-    # 惩罚基座倾斜，通过重力投影在水平面的分量鼓励保持直立。
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
-    # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
+    # 惩罚基座高度偏离目标设定值，控制机器人保持稳定的站立高度。
     # base_height = RewTerm(
     #     func=mdp.base_height_l2, 
     #     weight=-2, 
     #     params={"target_height": 0.78, "sensor_cfg": SceneEntityCfg("height_scanner")}
     # )
 
-    # -- feet
-    # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
-    # gait = RewTerm(
-    #     func=mdp.feet_gait,
-    #     weight=0.5,
-    #     params={
-    #         "period": 0.8,
-    #         "offset": [0.0, 0.5],
-    #         "threshold": 0.55,
-    #         "command_name": "base_velocity",
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-    #     },
-    # )
-    # 新增 -- 1. 奖励摆动脚有合理离地时间
+
+    # ==========================================
+    # 3. 关节控制与平滑 (Joints & Regularization)
+    # ==========================================
+    
+    # 惩罚过高的关节运动速度，防止动作过于剧烈。
+    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
+    
+    # 惩罚过大的关节加速度，抑制关节运动的突然抖动。
+    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
+    
+    # 惩罚相邻帧动作输出的变化率，促使网络输出平滑的控制信号。
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.02)
+    
+    # 惩罚关节速度与力矩乘积的绝对值之和，降低机器人的整体能量消耗。
+    energy = RewTerm(func=mdp.energy, weight=-2e-5)
+
+
+    # ==========================================
+    # 4. 足端与步态 (Feet & Gait)
+    # ==========================================
+    
+    # 鼓励摆动腿在空中有合理的离地时间，规范迈步动作。
     feet_air_time = RewTerm(
         func=mdp.feet_air_time_biped,
         weight=0.50,
@@ -429,7 +448,7 @@ class RewardsCfg:
         },
     )
 
-    # 新增 -- 2.惩罚脚撞到竖直面/台阶边
+    # 惩罚脚部撞击竖直障碍物或台阶边缘，防止行走时绊倒。
     feet_stumble = RewTerm(
         func=mdp.feet_stumble,
         weight=-1.5,
@@ -437,7 +456,8 @@ class RewardsCfg:
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
-    # 新增 --3.双脚过近惩罚
+    
+    # 惩罚双脚距离过近，避免左右脚发生自碰撞。
     feet_too_near = RewTerm(
         func=mdp.feet_too_near,
         weight=-1.0,
@@ -447,7 +467,7 @@ class RewardsCfg:
         },
     )
 
-    # 新增 -- 4.静止命令时鼓励双脚都接触地面：可选，小权重
+    # 在无速度指令的静止状态下，鼓励双脚同时接触地面以维持稳定站立。
     feet_contact_without_cmd = RewTerm(
         func=mdp.feet_contact_without_cmd,
         weight=0.05,
@@ -457,7 +477,7 @@ class RewardsCfg:
         },
     )
 
-    # 新增 -- 5. 足端落地冲击惩罚
+    # 惩罚足端落地时产生过大的冲击力，促使机器人实现软着陆。
     feet_force = RewTerm(
         func=mdp.feet_contact_force_penalty,
         weight=-3e-3,
@@ -468,7 +488,7 @@ class RewardsCfg:
         },
     )
   
-    # 惩罚脚在接触地面时的水平滑动，防止打滑。
+    # 惩罚支撑脚在接触地面时的水平移动，防止走动时打滑。
     feet_slide = RewTerm(
         func=mdp.feet_slide,
         weight=-0.2,
@@ -477,13 +497,29 @@ class RewardsCfg:
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
+
+    # 根据步态周期相位鼓励脚部按规律正确交替着地。
+    # gait = RewTerm(
+    #     func=mdp.feet_gait,
+    #     weight=0.5,
+    #     params={
+    #         "period": 0.8,
+    #         "offset": [0.0, 0.5],
+    #         "threshold": 0.55,
+    #         "command_name": "base_velocity",
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+    #     },
+    # )
 
 
+    # ==========================================
+    # 5. 安全与物理限制 (Safety & Limits)
+    # ==========================================
+    
+    # 惩罚关节位置超出设定的软限位区间，保护硬件机械结构不受损。
+    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
 
-
-
-    # 惩罚除脚踝外其他身体部位与地面的接触，避免意外碰撞。
+    # 惩罚除脚踝以外的身体部位触地，避免膝盖或躯干等部位的意外碰撞。
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
         weight=-1,
