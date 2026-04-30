@@ -46,30 +46,30 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
     slope_threshold=0.75,
     use_cache=False,
     sub_terrains={
-        # 1. 随机金字塔阶梯
-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.23), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0,
-        ),
-        # 2. 离散障碍物
-        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-            proportion=0.2,
-            horizontal_scale=0.1,
-            vertical_scale=0.005,
-            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
-            obstacle_width_range=(1.0, 2.0),
-            num_obstacles=40,
-            obstacle_height_mode="fixed",
-        ),
-        # 3. 标准阶梯
-        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.2), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0
-        ),
+        # # 1. 随机金字塔阶梯
+        # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.0, 0.23), # 下界改为 0.0
+        #     step_width=0.3,
+        #     platform_width=3.0,
+        # ),
+        # # 2. 离散障碍物
+        # "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+        #     proportion=0.2,
+        #     horizontal_scale=0.1,
+        #     vertical_scale=0.005,
+        #     obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
+        #     obstacle_width_range=(1.0, 2.0),
+        #     num_obstacles=40,
+        #     obstacle_height_mode="fixed",
+        # ),
+        # # 3. 标准阶梯
+        # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.0, 0.2), # 下界改为 0.0
+        #     step_width=0.3,
+        #     platform_width=3.0
+        # ),
         # 4. 坑洼/波浪地面
         "random_rough": terrain_gen.HfWaveTerrainCfg(
             proportion=0.2,
@@ -86,19 +86,28 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             noise_range=(0.0, 0.06),   # 最大 8cm 凹凸
             noise_step=0.02,
         ),
-        # 不规则高低地形（台阶）
-        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
-            proportion=0.05,
-            grid_width=0.49,
-            grid_height_range=(0.0, 0.1),
+        # # 不规则高低地形（台阶）
+        # "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+        #     proportion=0.05,
+        #     grid_width=0.49,
+        #     grid_height_range=(0.0, 0.1),
+        # ),
+
+        # # 坡度地形
+        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+        #     proportion=0.05,
+        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+        #     platform_width=3.0,
+        # ),
+        "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            num_obstacles=10,
+            obstacle_height_mode="fixed",
+            obstacle_height_range=(1, 1.5),
+            obstacle_width_range=(0.3, 1.5),
+            platform_width=0.5,
         ),
 
-        # 坡度地形
-        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.05,
-            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
-            platform_width=3.0,
-        ),
     },
 )
 
@@ -136,7 +145,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/torso_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 1.0]),
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
@@ -235,10 +244,10 @@ class CommandsCfg:
         heading_command=False,
         debug_vis=True,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
+            lin_vel_x=(-0, 0.1), lin_vel_y=(-0, 0), ang_vel_z=(-0.1, 0.1)
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5)
+            lin_vel_x=(-0, 0.7), lin_vel_y=(-0, 0), ang_vel_z=(-0.5, 0.5)
         ),
     )
 
