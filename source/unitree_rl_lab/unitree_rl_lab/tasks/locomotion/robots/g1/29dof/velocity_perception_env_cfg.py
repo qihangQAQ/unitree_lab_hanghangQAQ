@@ -20,6 +20,12 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from unitree_rl_lab.assets.robots.unitree import G1_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
+from unitree_rl_lab.tasks.fdm.mdp.terrains import (
+    MeshPillarTerrainCfg,
+    SingleObjectTerrainCfg,
+    StairsRampEvalTerrainCfg,
+)
+from unitree_rl_lab.tasks.fdm.mdp.terrains.single_object import cross_object_pattern
 
 COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     size=(8.0, 8.0),
@@ -46,30 +52,23 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
     slope_threshold=0.75,
     use_cache=False,
     sub_terrains={
-        # # 1. 随机金字塔阶梯
-        # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-        #     proportion=0.2,
-        #     step_height_range=(0.0, 0.23), # 下界改为 0.0
-        #     step_width=0.3,
-        #     platform_width=3.0,
-        # ),
-        # # 2. 离散障碍物
-        # "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-        #     proportion=0.2,
-        #     horizontal_scale=0.1,
-        #     vertical_scale=0.005,
-        #     obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
-        #     obstacle_width_range=(1.0, 2.0),
-        #     num_obstacles=40,
-        #     obstacle_height_mode="fixed",
-        # ),
-        # # 3. 标准阶梯
-        # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-        #     proportion=0.2,
-        #     step_height_range=(0.0, 0.2), # 下界改为 0.0
-        #     step_width=0.3,
-        #     platform_width=3.0
-        # ),
+        # 1. 随机金字塔阶梯
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.0, 0.23), # 下界改为 0.0
+            step_width=0.3,
+            platform_width=3.0,
+        ),
+        # 2. 离散障碍物
+        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
+            obstacle_width_range=(1.0, 2.0),
+            num_obstacles=40,
+            obstacle_height_mode="fixed",
+        ),
         # 4. 坑洼/波浪地面
         "random_rough": terrain_gen.HfWaveTerrainCfg(
             proportion=0.2,
@@ -86,26 +85,66 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             noise_range=(0.0, 0.06),   # 最大 8cm 凹凸
             noise_step=0.02,
         ),
-        # # 不规则高低地形（台阶）
-        # "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
-        #     proportion=0.05,
-        #     grid_width=0.49,
-        #     grid_height_range=(0.0, 0.1),
-        # ),
 
-        # # 坡度地形
-        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-        #     proportion=0.05,
-        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
-        #     platform_width=3.0,
-        # ),
+        # 坡度地形
+        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.05,
+            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+            platform_width=3.0,
+        ),
         "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-            proportion=0.2,
+            proportion=0.15,
             num_obstacles=10,
             obstacle_height_mode="fixed",
             obstacle_height_range=(1, 1.5),
             obstacle_width_range=(0.3, 1.5),
             platform_width=0.5,
+        ),
+        # === FDM 复杂障碍 ===
+        # 柱子群：地面上随机散布盒子+圆柱体，中央留安全平台
+        "pillar_cluster": MeshPillarTerrainCfg(
+            proportion=0.08,
+            box_objects=MeshPillarTerrainCfg.BoxCfg(
+                width=(0.4, 1.0),
+                length=(0.2, 0.5),
+                max_yx_angle=(0, 10),
+                height=(1.5, 2.0),
+                num_objects=(3, 5),
+            ),
+            cylinder_cfg=MeshPillarTerrainCfg.CylinderCfg(
+                radius=(0.3, 0.5),
+                max_yx_angle=(0, 5),
+                height=(1.5, 2.0),
+                num_objects=(3, 5),
+            ),
+        ),
+        # 十字障碍阵：4个盒子形成十字屏障，必须绕行
+        "box_cross": SingleObjectTerrainCfg(
+            proportion=0.07,
+            object_type="box",
+            dim_range=[0.5, 1.0],
+            height_range=[1.5, 2.0],
+            position_pattern=cross_object_pattern,
+        ),
+        # 楼梯+坡道+墙组合：40%概率替换为墙
+        "stairs_ramp_wall": StairsRampEvalTerrainCfg(
+            proportion=0.08,
+            modify_step_height=True,
+            step_height_range=(0.1, 0.3),
+            step_width=0.3,
+            platform_width=1.0,
+            center_platform_width=1.0,
+            width_randomization=1.5,
+            random_stairs_ramp_position_flipping=True,
+            random_wall_probability=0.2,
+            max_height=1.0,
+        ),
+        # 单个大物体（盒子/圆柱/墙）
+        "single_box": SingleObjectTerrainCfg(
+            proportion=0.07,
+            object_type="box",
+            dim_range=[0.8, 1.5],
+            height_range=[1.5, 2.5],
         ),
 
     },
@@ -148,7 +187,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/torso_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 1.2]),
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
@@ -606,7 +645,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 4
+        self.scene.num_envs = 16
         
         # --- 核心地形难度控制 ---
         
@@ -618,7 +657,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         # self.scene.terrain.terrain_generator.num_rows = 10
         # self.scene.terrain.terrain_generator.num_cols = 20
 
-        self.scene.terrain.terrain_generator.num_rows = 1
+        self.scene.terrain.terrain_generator.num_rows = 4
         self.scene.terrain.terrain_generator.num_cols = 4
 
         # 2. 锁定地形难度（最低难度0 - 最高难度1）
