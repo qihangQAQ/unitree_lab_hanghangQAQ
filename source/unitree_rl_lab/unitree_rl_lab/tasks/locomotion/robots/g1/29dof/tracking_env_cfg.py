@@ -16,7 +16,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
-from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
+from unitree_rl_lab.assets.robots.unitree import G1_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
 
 COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
@@ -179,7 +179,7 @@ class CommandsCfg:
         amplitude_range=(0.15, 0.40),                 # 波浪/圆环的振幅范围
         frequency_range=(8.0, 15.0),                  # 形状的频率范围
         x_noise_scale=0.0012,                         # 墙面不平整度 (X 轴随机游走噪声)
-        normal_noise_scale=0.02,                      # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
+        normal_noise_scale=0.00,                      # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
         
         # 起点与工作空间控制
         start_x_forward=0.50,                         # 起点控制：第一点固定在机器人 root 坐标系正前方 50cm 处
@@ -319,55 +319,92 @@ class RewardsCfg:
     # (5) 动作平滑度惩罚
     action_smoothness = RewTerm(
         func=mdp.ee_action_smoothness_penalty,
-        weight=-0.05,
+        weight=-0.005,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
-    # =================== 2. 底盘移动与特定步态 ===================
-    # 特定侧滑步态 (你要求的步态)
-    feet_gait_spray = RewTerm(
-        func=mdp.feet_gait_spray,  # 请确保你已经把这个函数加到了 rewards.py 中
-        weight=2.0,
+    # =================== 2. 底盘移动--弱先验版本 ===================
+    # 
+    # feet_air_time = RewTerm(
+    #     func=mdp.feet_air_time_biped,
+    #     weight=0.2,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+    #         "command_name": "hand_tracking",
+    #         "threshold": 0.18,
+    #         "max_air_time": 0.45,
+    #         "vel_start_idx": 25,
+    #     },
+    # )
+
+    feet_stumble = RewTerm(
+        func=mdp.feet_stumble,
+        weight=-1.0,
         params={
-            "period": 0.6,
-            "offset": [0.0, 0.5],
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-            "command_name": "hand_tracking",
-            "move_speed_thresh": 0.02,
         },
     )
 
-    # =================== 3. 前期单纯的任务追踪  ===================
-    base_xy_pos_tracking = RewTerm(func=mdp.base_xy_pos_tracking, weight=2.0,
-                                   params={"command_name": "hand_tracking", "std": 0.15})
-    base_xy_velocity_tracking = RewTerm(func=mdp.base_xy_velocity_tracking, weight=3.0,
-                                        params={"command_name": "hand_tracking", "std": 0.1})
-    base_face_surface_normal = RewTerm(
-        func=mdp.base_face_surface_normal, 
-        weight=2.0, 
-        params={"command_name": "hand_tracking", "std": 0.2}
-    )
-
-    # =================== 4. 手臂锁  ===================
-    joint_deviation_arms_dynamic = RewTerm(
-        func=mdp.joint_deviation_arms_curriculum,
-        weight=-0.08,  # 给一个中等惩罚，足够让一阶段锁住双手，又不至于破坏其他动作
+    feet_too_near = RewTerm(
+        func=mdp.feet_too_near,
+        weight=-1.0,
         params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            "left_arm_joints": [
-                "left_shoulder_.*_joint",
-                "left_elbow_joint",
-                "left_wrist_.*",
-            ],
-            "right_arm_joints": [
-                "right_shoulder_.*_joint",
-                "right_elbow_joint",
-                "right_wrist_.*",
-            ],
+            "threshold": 0.16,
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
         },
     )
-    # 【新增】引入动态下蹲追踪，权重给到 1.5
-    base_z_pos_tracking = RewTerm(func=mdp.base_z_pos_tracking, weight=1.5, params={"command_name": "hand_tracking", "std": 0.1})
+
+
+    feet_slide = RewTerm(
+        func=mdp.feet_slide,
+        weight=-1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+        },
+    )
+
+    feet_air_time_variance = RewTerm(
+        func=mdp.air_time_variance_penalty,
+        weight=-1.0,  # 严厉惩罚不对称
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+        },
+    )
+
+
+    # =================== 3. 基座追踪与姿态  ===================
+    track_base_vel = RewTerm(
+        func=mdp.track_base_vel_command,
+        weight=1.5,
+        params={"command_name": "hand_tracking", "std": 0.5},
+    )
+    track_body_height = RewTerm(
+        func=mdp.track_body_height_command,
+        weight=1.0,
+        params={"command_name": "hand_tracking", "std": 0.2},
+    )
+    base_face_surface_normal = RewTerm(
+        func=mdp.base_face_surface_normal,
+        weight=2.0,
+        params={"command_name": "hand_tracking", "std": 0.35}
+    )
+
+    # =================== 4. 手臂舒适姿态  ===================
+    joint_deviation_arms = RewTerm(
+        func=mdp.joint_deviation_l1,
+        weight=-0.01,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=[
+                    ".*_shoulder_.*_joint",
+                    ".*_elbow_joint",
+                    ".*_wrist_.*",
+                ],
+            )
+        },
+    )
 
     # =================== 基础生存与姿态惩罚 ===================
     alive = RewTerm(func=mdp.is_alive, weight=0.15)
@@ -381,20 +418,7 @@ class RewardsCfg:
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
     energy = RewTerm(func=mdp.energy, weight=-2e-5)
 
-    # joint_deviation_arms = RewTerm(
-    #     func=mdp.joint_deviation_l1,
-    #     weight=-0.1,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg(
-    #             "robot",
-    #             joint_names=[
-    #                 ".*_shoulder_.*_joint",
-    #                 ".*_elbow_joint",
-    #                 ".*_wrist_.*",
-    #             ],
-    #         )
-    #     },
-    # )
+    # joint_deviation_arms 已移至上方 section 4
     joint_deviation_waists = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-1,
@@ -409,13 +433,12 @@ class RewardsCfg:
     )
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1.0,
+        weight=-0.5,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
     )
 
     # -- robot
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-2.0, params={"target_height": 0.78})
 
     # -- feet
     # gait = RewTerm(
@@ -429,24 +452,17 @@ class RewardsCfg:
     #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
     #     },
     # )
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.2,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-        },
-    )
-    feet_clearance = RewTerm(
-        func=mdp.foot_clearance_reward,
-        weight=1.0,
-        params={
-            "std": 0.05,
-            "tanh_mult": 2.0,
-            "target_height": 0.1,
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-        },
-    )
+
+    # feet_clearance = RewTerm(
+    #     func=mdp.foot_clearance_reward,
+    #     weight=1.0,
+    #     params={
+    #         "std": 0.05,
+    #         "tanh_mult": 2.0,
+    #         "target_height": 0.1,
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+    #     },
+    # )
 
     # -- other
     undesired_contacts = RewTerm(
@@ -477,21 +493,7 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    # lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
-    hand_tracking_levels = CurrTerm(
-        func=mdp.hand_tracking_levels,  # 指向刚才写的新函数
-        params={"reward_term_name": "ee_pos_tracking_tight"}
-    )
-
-    # 【新增】动态开启手臂奖励的课程
-    arm_reward_levels = CurrTerm(
-        func=mdp.arm_tracking_reward_curriculum,
-        params={
-            "trigger_reward_name": "base_xy_pos_tracking", # 只有底盘走得好，才解锁手臂
-            "step_size": 0.05 # 经过 20 次优异表现才完全解锁 (越平滑越不容易掉分)
-        }
-    )
+    pass
 
 
 
@@ -560,11 +562,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         # 开启可视化，便于观察路径和目标点（可选）
         cmd.debug_vis = True
 
-        # ========== 3. 禁用课程学习 ==========
-        self.curriculum.hand_tracking_levels = None
-        self.curriculum.arm_reward_levels = None   # 如果有手臂奖励课程，也禁用
-        # 如果还有其他课程项（如 terrain_levels），也设为 None
-        # self.curriculum.terrain_levels = None
+        # ========== 3. 课程已禁用（无课程设计） ==========
 
         # ========== 4. 固定随机化事件 ==========
         # 移除 startup 随机化（摩擦、质量）

@@ -766,12 +766,7 @@ def ee_reach_pos_target_soft(
     command = env.command_manager.get_command(command_name)
     pos_error_vec = command[:, 0:3]  # 0cm处的位置误差
     distance = torch.norm(pos_error_vec, dim=-1)
-    base_reward = 1.0 / (1.0 + torch.square(distance / std))
-
-    # 【核心修改】读取环境的动态放开比例
-    default_scale = 1.0 if getattr(env.cfg.curriculum, "arm_reward_levels", None) is None else 0.0
-    scale = getattr(env, "arm_reward_scale", default_scale)
-    return base_reward * scale
+    return 1.0 / (1.0 + torch.square(distance / std))
 
 
 def ee_reach_pos_target_tight(
@@ -784,11 +779,7 @@ def ee_reach_pos_target_tight(
     command = env.command_manager.get_command(command_name)
     pos_error_vec = command[:, 0:3]
     distance = torch.norm(pos_error_vec, dim=-1)
-    base_reward = torch.exp(-(distance / std) ** 2)
-
-    default_scale = 1.0 if getattr(env.cfg.curriculum, "arm_reward_levels", None) is None else 0.0
-    scale = getattr(env, "arm_reward_scale", default_scale)
-    return base_reward * scale
+    return torch.exp(-(distance / std) ** 2)
 
 
 def reach_rot_target(
@@ -800,11 +791,7 @@ def reach_rot_target(
     command = env.command_manager.get_command(command_name)
     rot_error_vec = command[:, 3:6]  # 0cm处的姿态误差
     angle_error = torch.norm(rot_error_vec, dim=-1)
-    base_reward = 1.0 / (1.0 + torch.square(angle_error / std))
-
-    default_scale = 1.0 if getattr(env.cfg.curriculum, "arm_reward_levels", None) is None else 0.0
-    scale = getattr(env, "arm_reward_scale", default_scale)
-    return base_reward * scale
+    return 1.0 / (1.0 + torch.square(angle_error / std))
 
 
 def ee_velocity_tracking(
@@ -833,15 +820,7 @@ def ee_velocity_tracking(
     v_des = cmd_term.command[:, 24]
 
     speed_error = v_tan - v_des
-    # 1. 算出原本的满分 base_reward
-    base_reward = torch.exp(-(speed_error ** 2) / (std ** 2))
-
-    # 2. 从 env 中安全地获取动态开启比例（没有的话默认就是 0.0）
-    default_scale = 1.0 if getattr(env.cfg.curriculum, "arm_reward_levels", None) is None else 0.0
-    scale = getattr(env, "arm_reward_scale", default_scale)
-
-    # 3. 返回缩放后的奖励
-    return base_reward * scale
+    return torch.exp(-(speed_error ** 2) / (std ** 2))
 
 
 def ee_action_smoothness_penalty(
@@ -998,24 +977,16 @@ def feet_gait_spray(
         is_stance = leg_phase[:, i] < threshold
         reward += ~(is_stance ^ is_contact[:, i])
 
-    # ===== 核心修改：基于底盘期望速度的掩码 =====
+    # ===== 直接使用命令中的显式速度命令 (indices 25-26) =====
     cmd_term = env.command_manager.get_term(command_name)
-
-    # 1. 获取路径在底盘 XY 平面的投影速度
-    tangent_b = cmd_term.current_tangent_b
-    v_des_scalar = cmd_term.command[:, 24]
-    desired_lin_vel_b_xy = tangent_b[:, :2] * v_des_scalar.unsqueeze(1)
-
-    # 2. 计算底盘期望的平面移动速率
+    desired_lin_vel_b_xy = cmd_term.command[:, 25:27]
     desired_base_speed = torch.norm(desired_lin_vel_b_xy, dim=-1)
-
-    # 3. 如果速度大于阈值，说明在横扫墙面，强制迈腿；如果小于阈值（竖直喷漆），掩码为 0，允许双脚站立
     move_mask = desired_base_speed > move_speed_thresh
 
     return reward * move_mask.float()
 
 
-# 新增 -- 鼓励机器人根据末端位置误差自动调整底盘高度，尤其是在需要下蹲的时候（例如目标点在较低位置时）。通过限制期望高度在合理范围内，防止机器人试图做出不切实际的动作。
+# （已弃用：改为 track_body_height_command 直接跟踪命令）
 def base_z_pos_tracking(
         env: ManagerBasedRLEnv,
         command_name: str,
@@ -1141,3 +1112,37 @@ def feet_contact_force_penalty(
 
     # 归一化到相对稳定的量级，方便配 weight
     return torch.sum(excess, dim=1) / max_excess
+
+
+# ==============================================================================
+# New: Hand Tracking velocity & body height tracking
+# ==============================================================================
+
+def track_base_vel_command(
+    env: ManagerBasedRLEnv,
+    std: float,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track base linear velocity command (v_x_b, v_y_b at command indices 25-26)."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    vel_cmd = command[:, 25:27]
+    vel_cur = asset.data.root_lin_vel_b[:, :2]
+    lin_vel_error = torch.sum(torch.square(vel_cmd - vel_cur), dim=1)
+    return torch.exp(-lin_vel_error / std**2)
+
+
+def track_body_height_command(
+    env: ManagerBasedRLEnv,
+    std: float,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Track body height command (at command index 27) using exponential kernel."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    height_target = command[:, 27]
+    height_cur = asset.data.root_pos_w[:, 2]
+    height_error = torch.abs(height_target - height_cur)
+    return torch.exp(-(height_error / std) ** 2)

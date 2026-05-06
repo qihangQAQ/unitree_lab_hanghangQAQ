@@ -114,7 +114,7 @@ class HandTrackingCommand(CommandTerm):
         self.env_spray_dists = torch.zeros(self.num_envs, device=self.device)
         self.current_arc_length = torch.zeros(self.num_envs, device=self.device)
 
-        self.command_b = torch.zeros(self.num_envs, 25, device=self.device)
+        self.command_b = torch.zeros(self.num_envs, 28, device=self.device)
         self.current_tangent_b = torch.zeros(self.num_envs, 3, device=self.device)
         self.base_forward_ref_w = torch.zeros(self.num_envs, 2, device=self.device)
 
@@ -346,8 +346,19 @@ class HandTrackingCommand(CommandTerm):
         p_curr, n_curr = self._get_interpolated_target(env_ids, curr_s)
         p_next, _ = self._get_interpolated_target(env_ids, curr_s + 0.05)
         tangent_w = safe_normalize(p_next - p_curr, dim=-1)
-        self.current_tangent_b[env_ids] = math_utils.quat_apply_inverse(root_quat_w, tangent_w)
-        
+        tangent_b = math_utils.quat_apply_inverse(root_quat_w, tangent_w)
+        self.current_tangent_b[env_ids] = tangent_b
+
+        # 新增：基座期望速度命令 (base frame)
+        speeds = self.env_speeds[env_ids]
+        self.command_b[env_ids, 25] = tangent_b[:, 0] * speeds  # v_x_b
+        self.command_b[env_ids, 26] = tangent_b[:, 1] * speeds  # v_y_b
+
+        # 新增：身体期望高度命令
+        trajectory_z = p_curr[:, 2]
+        body_height_target = torch.clamp(trajectory_z - 0.15, min=0.50, max=0.95)
+        self.command_b[env_ids, 27] = body_height_target
+
         self.current_surf_n_w[env_ids] = n_curr
 
         if self.cfg.debug_vis and len(vis_points) > 0:
@@ -392,12 +403,12 @@ class HandTrackingCommandCfg(CommandTermCfg):
     amplitude_range: tuple[float, float] = (0.15, 0.40)  # 波浪/圆环的振幅范围
     frequency_range: tuple[float, float] = (8.0, 15.0)   # 频率范围
     x_noise_scale: float = 0.0012                        # 墙面不平整度 (X 轴随机游走噪声)。
-    normal_noise_scale: float = 0.02                     # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
+    normal_noise_scale: float = 0.00                     # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
 
     start_x_forward: float = 0.50                       # 起点控制：第一点固定在机器人 root 坐标系正前方 50cm 处
     start_y_offset_range: tuple[float, float] = (-0.1, 0.1)# 起点在左右 (Y 轴) 方向上的随机偏移范围，增加初始位置的多样性 (-10cm 到 10cm)
     start_z_offset_range: tuple[float, float] = (0.2, 0.4)# 起点高度相对于机器人 root 高度的偏移范围 (往上偏 20cm 到 40cm，大概是胸前位置)
-    workspace_z: tuple[float, float] = (0.60, 1.30)# 绝对安全工作空间 (Z 轴高度)。生成的轨迹在任何情况下都会被强制截断在这个高度范围内，
+    workspace_z: tuple[float, float] = (0.60, 1.10)# 绝对安全工作空间 (Z 轴高度)。生成的轨迹在任何情况下都会被强制截断在这个高度范围内，
 
     debug_vis: bool = True
 
