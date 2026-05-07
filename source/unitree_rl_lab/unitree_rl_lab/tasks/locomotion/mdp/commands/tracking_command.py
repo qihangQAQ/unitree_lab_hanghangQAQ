@@ -349,15 +349,13 @@ class HandTrackingCommand(CommandTerm):
         tangent_b = math_utils.quat_apply_inverse(root_quat_w, tangent_w)
         self.current_tangent_b[env_ids] = tangent_b
 
-        # 新增：基座期望速度命令 (base frame)
+        # 基座期望速度命令 (base frame)
         speeds = self.env_speeds[env_ids]
         self.command_b[env_ids, 25] = tangent_b[:, 0] * speeds  # v_x_b
         self.command_b[env_ids, 26] = tangent_b[:, 1] * speeds  # v_y_b
 
-        # 新增：身体期望高度命令
-        trajectory_z = p_curr[:, 2]
-        body_height_target = torch.clamp(trajectory_z - 0.15, min=0.50, max=0.95)
-        self.command_b[env_ids, 27] = body_height_target
+        # 身体期望高度命令 (暂时固定站立高度，后续可改为动态)
+        self.command_b[env_ids, 27] = 0.78
 
         self.current_surf_n_w[env_ids] = n_curr
 
@@ -408,7 +406,7 @@ class HandTrackingCommandCfg(CommandTermCfg):
     start_x_forward: float = 0.50                       # 起点控制：第一点固定在机器人 root 坐标系正前方 50cm 处
     start_y_offset_range: tuple[float, float] = (-0.1, 0.1)# 起点在左右 (Y 轴) 方向上的随机偏移范围，增加初始位置的多样性 (-10cm 到 10cm)
     start_z_offset_range: tuple[float, float] = (0.2, 0.4)# 起点高度相对于机器人 root 高度的偏移范围 (往上偏 20cm 到 40cm，大概是胸前位置)
-    workspace_z: tuple[float, float] = (0.60, 1.10)# 绝对安全工作空间 (Z 轴高度)。生成的轨迹在任何情况下都会被强制截断在这个高度范围内，
+    workspace_z: tuple[float, float] = (0.88, 1.10)# 绝对安全工作空间 (Z 轴高度)。生成的轨迹在任何情况下都会被强制截断在这个高度范围内，
 
     debug_vis: bool = True
 
