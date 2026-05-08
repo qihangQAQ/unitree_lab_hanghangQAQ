@@ -92,60 +92,60 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
             platform_width=3.0,
         ),
-        "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-            proportion=0.15,
-            num_obstacles=10,
-            obstacle_height_mode="fixed",
-            obstacle_height_range=(1, 1.5),
-            obstacle_width_range=(0.3, 1.5),
-            platform_width=0.5,
-        ),
-        # === FDM 复杂障碍 ===
-        # 柱子群：地面上随机散布盒子+圆柱体，中央留安全平台
-        "pillar_cluster": MeshPillarTerrainCfg(
-            proportion=0.08,
-            box_objects=MeshPillarTerrainCfg.BoxCfg(
-                width=(0.4, 1.0),
-                length=(0.2, 0.5),
-                max_yx_angle=(0, 10),
-                height=(1.5, 2.0),
-                num_objects=(3, 5),
-            ),
-            cylinder_cfg=MeshPillarTerrainCfg.CylinderCfg(
-                radius=(0.3, 0.5),
-                max_yx_angle=(0, 5),
-                height=(1.5, 2.0),
-                num_objects=(3, 5),
-            ),
-        ),
-        # 十字障碍阵：4个盒子形成十字屏障，必须绕行
-        "box_cross": SingleObjectTerrainCfg(
-            proportion=0.07,
-            object_type="box",
-            dim_range=[0.5, 1.0],
-            height_range=[1.5, 2.0],
-            position_pattern=cross_object_pattern,
-        ),
-        # 楼梯+坡道+墙组合：40%概率替换为墙
-        "stairs_ramp_wall": StairsRampEvalTerrainCfg(
-            proportion=0.08,
-            modify_step_height=True,
-            step_height_range=(0.1, 0.3),
-            step_width=0.3,
-            platform_width=1.0,
-            center_platform_width=1.0,
-            width_randomization=1.5,
-            random_stairs_ramp_position_flipping=True,
-            random_wall_probability=0.2,
-            max_height=1.0,
-        ),
-        # 单个大物体（盒子/圆柱/墙）
-        "single_box": SingleObjectTerrainCfg(
-            proportion=0.07,
-            object_type="box",
-            dim_range=[0.8, 1.5],
-            height_range=[1.5, 2.5],
-        ),
+        # "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+        #     proportion=0.15,
+        #     num_obstacles=10,
+        #     obstacle_height_mode="fixed",
+        #     obstacle_height_range=(1, 1.5),
+        #     obstacle_width_range=(0.3, 1.5),
+        #     platform_width=0.5,
+        # ),
+        # # === FDM 复杂障碍 ===
+        # # 柱子群：地面上随机散布盒子+圆柱体，中央留安全平台
+        # "pillar_cluster": MeshPillarTerrainCfg(
+        #     proportion=0.08,
+        #     box_objects=MeshPillarTerrainCfg.BoxCfg(
+        #         width=(0.4, 1.0),
+        #         length=(0.2, 0.5),
+        #         max_yx_angle=(0, 10),
+        #         height=(1.5, 2.0),
+        #         num_objects=(3, 5),
+        #     ),
+        #     cylinder_cfg=MeshPillarTerrainCfg.CylinderCfg(
+        #         radius=(0.3, 0.5),
+        #         max_yx_angle=(0, 5),
+        #         height=(1.5, 2.0),
+        #         num_objects=(3, 5),
+        #     ),
+        # ),
+        # # 十字障碍阵：4个盒子形成十字屏障，必须绕行
+        # "box_cross": SingleObjectTerrainCfg(
+        #     proportion=0.07,
+        #     object_type="box",
+        #     dim_range=[0.5, 1.0],
+        #     height_range=[1.5, 2.0],
+        #     position_pattern=cross_object_pattern,
+        # ),
+        # # 楼梯+坡道+墙组合：40%概率替换为墙
+        # "stairs_ramp_wall": StairsRampEvalTerrainCfg(
+        #     proportion=0.08,
+        #     modify_step_height=True,
+        #     step_height_range=(0.1, 0.3),
+        #     step_width=0.3,
+        #     platform_width=1.0,
+        #     center_platform_width=1.0,
+        #     width_randomization=1.5,
+        #     random_stairs_ramp_position_flipping=True,
+        #     random_wall_probability=0.2,
+        #     max_height=1.0,
+        # ),
+        # # 单个大物体（盒子/圆柱/墙）
+        # "single_box": SingleObjectTerrainCfg(
+        #     proportion=0.07,
+        #     object_type="box",
+        #     dim_range=[0.8, 1.5],
+        #     height_range=[1.5, 2.5],
+        # ),
 
     },
 )
@@ -336,8 +336,8 @@ class ObservationsCfg:
         )
 
         def __post_init__(self):
-            self.history_length = 1  # 取消历史帧
-            self.enable_corruption = False  # 禁用观测干扰
+            self.history_length = 5
+            self.enable_corruption = True
             self.concatenate_terms = True
 
     # observation groups
@@ -370,7 +370,7 @@ class ObservationsCfg:
 
 
         def __post_init__(self):
-            self.history_length = 1
+            self.history_length = 5
 
     # privileged observations
     critic: CriticCfg = CriticCfg()

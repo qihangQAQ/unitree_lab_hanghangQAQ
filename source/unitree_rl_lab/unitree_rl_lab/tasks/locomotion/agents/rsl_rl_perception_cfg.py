@@ -57,16 +57,11 @@ class UnitreePerceptionRunnerCfg(RslRlOnPolicyRunnerCfg):
     empirical_normalization = False
 
     # Policy configuration with perception network
-    policy = RslRlPerceptionActorCriticCfg(
+    policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_hidden_dims=[256, 128],      # MLP after LSTM
-        critic_hidden_dims=[256, 128],     # MLP after LSTM
+        actor_hidden_dims=[256, 128],
+        critic_hidden_dims=[256, 128],
         activation="elu",
-        noise_std_type="log", 
-
-        # New hyperparameters for perception network
-        lstm_hidden_size=256,
-        terrain_encoder_dims=[256, 128], # 编码器网络结构 两层MLP（256→128）
     )
 
     # Algorithm configuration (same as PPO)
