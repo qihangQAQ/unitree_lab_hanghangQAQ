@@ -21,6 +21,7 @@ from .modules.actor_critic_np3o import ActorCriticNP3O
 from .storage.rollout_storage_np3o import NP3ORolloutStorage
 from .runners.on_policy_runner_np3o import NP3ORunner
 from .modules.actor_critic_perception import ActorCriticPerception
+from .modules.actor_critic_depth import ActorCriticDepth
 
 # 定义要注入的类映射
 _CLASSES_TO_INJECT = {
@@ -29,6 +30,7 @@ _CLASSES_TO_INJECT = {
     'NP3ORolloutStorage': NP3ORolloutStorage,
     'NP3ORunner': NP3ORunner,
     'ActorCriticPerception': ActorCriticPerception,
+    'ActorCriticDepth': ActorCriticDepth,
 }
 
 def inject_classes():
@@ -61,12 +63,13 @@ def inject_classes():
         except ImportError as e:
             print(f"   ⚠️  无法导入 rsl_rl.algorithms: {e}")
 
-        # ActorCriticNP3O 和 ActorCriticPerception -> rsl_rl.modules
+        # ActorCriticNP3O 和 ActorCriticPerception, ActorCriticDepth -> rsl_rl.modules
         try:
             import rsl_rl.modules
             rsl_rl.modules.ActorCriticNP3O = ActorCriticNP3O
             rsl_rl.modules.ActorCriticPerception = ActorCriticPerception
-            print(f"   ✅ 成功注入 ActorCriticNP3O 和 ActorCriticPerception 到 rsl_rl.modules")
+            rsl_rl.modules.ActorCriticDepth = ActorCriticDepth
+            print(f"   ✅ 成功注入 ActorCriticNP3O, ActorCriticPerception, ActorCriticDepth 到 rsl_rl.modules")
         except ImportError as e:
             print(f"   ⚠️  无法导入 rsl_rl.modules: {e}")
 
@@ -84,12 +87,12 @@ def inject_classes():
             rsl_rl.runners.NP3ORunner = NP3ORunner
             print(f"   ✅ 成功注入 NP3ORunner 到 rsl_rl.runners")
 
-            # 尝试将 ActorCriticPerception 添加到 on_policy_runner 模块的全局命名空间
-            # 因为 eval() 是在这个模块中执行的
+            # 尝试将 ActorCriticPerception 和 ActorCriticDepth 添加到 on_policy_runner 模块的全局命名空间
             try:
                 import rsl_rl.runners.on_policy_runner
                 rsl_rl.runners.on_policy_runner.ActorCriticPerception = ActorCriticPerception
-                print(f"   ✅ 成功注入 ActorCriticPerception 到 rsl_rl.runners.on_policy_runner")
+                rsl_rl.runners.on_policy_runner.ActorCriticDepth = ActorCriticDepth
+                print(f"   ✅ 成功注入 ActorCriticPerception, ActorCriticDepth 到 rsl_rl.runners.on_policy_runner")
             except ImportError as e:
                 print(f"   ⚠️  无法导入 rsl_rl.runners.on_policy_runner: {e}")
         except ImportError as e:
@@ -102,7 +105,7 @@ def inject_classes():
             print(f"   ⚠️  更新 algorithms.__all__ 时出错: {e}")
 
         try:
-            _update_submodule_all('modules', ['ActorCriticNP3O', 'ActorCriticPerception'])
+            _update_submodule_all('modules', ['ActorCriticNP3O', 'ActorCriticPerception', 'ActorCriticDepth'])
         except Exception as e:
             print(f"   ⚠️  更新 modules.__all__ 时出错: {e}")
 
@@ -112,7 +115,7 @@ def inject_classes():
             print(f"   ⚠️  更新 storage.__all__ 时出错: {e}")
 
         try:
-            _update_submodule_all('runners', ['NP3ORunner', 'ActorCriticPerception'])
+            _update_submodule_all('runners', ['NP3ORunner', 'ActorCriticPerception', 'ActorCriticDepth'])
         except Exception as e:
             print(f"   ⚠️  更新 runners.__all__ 时出错: {e}")
 
@@ -147,10 +150,10 @@ def _update_submodule_all(submodule_name, class_names):
 _injection_successful = inject_classes()
 
 # 导出 NP3O 类
-__all__ = ['NP3O', 'ActorCriticNP3O', 'ActorCriticPerception', 'NP3ORolloutStorage', 'NP3ORunner', 'inject_classes']
+__all__ = ['NP3O', 'ActorCriticNP3O', 'ActorCriticPerception', 'ActorCriticDepth', 'NP3ORolloutStorage', 'NP3ORunner', 'inject_classes']
 
 # 重新导出以便直接导入
 from .algorithms import NP3O
-from .modules import ActorCriticNP3O, ActorCriticPerception
+from .modules import ActorCriticNP3O, ActorCriticPerception, ActorCriticDepth
 from .storage import NP3ORolloutStorage
 from .runners import NP3ORunner

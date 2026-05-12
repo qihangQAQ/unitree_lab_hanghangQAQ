@@ -63,3 +63,15 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_perception_cfg:UnitreePerceptionRunnerCfg",
     },
 )
+
+# 速度命令深度感知控制（用深度图替代高程图）
+gym.register(
+    id="Unitree-G1-29dof-Velocity-Depth",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_depth_env_cfg:RobotEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_depth_env_cfg:RobotPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_depth_cfg:UnitreeDepthRunnerCfg",
+    },
+)

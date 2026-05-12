@@ -2,5 +2,6 @@
 
 from .actor_critic_np3o import ActorCriticNP3O
 from .actor_critic_perception import ActorCriticPerception
+from .actor_critic_depth import ActorCriticDepth
 
-__all__ = ["ActorCriticNP3O", "ActorCriticPerception"]
+__all__ = ["ActorCriticNP3O", "ActorCriticPerception", "ActorCriticDepth"]
