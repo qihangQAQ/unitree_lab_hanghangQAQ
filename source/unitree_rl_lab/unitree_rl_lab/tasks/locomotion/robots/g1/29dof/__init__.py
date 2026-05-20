@@ -75,3 +75,15 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_depth_cfg:UnitreeDepthRunnerCfg",
     },
 )
+
+# 速度命令感知控制 — Student 蒸馏（从 Teacher 行为克隆）
+gym.register(
+    id="Unitree-G1-29dof-Velocity-Student",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_student_env_cfg:RobotEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_student_env_cfg:RobotPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_student_cfg:UnitreeStudentRunnerCfg",
+    },
+)
