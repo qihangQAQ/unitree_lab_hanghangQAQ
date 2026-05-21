@@ -400,7 +400,7 @@ UNITREE_G1_29DOF_CFG = UnitreeArticulationCfg(
     # ),
     # spawn（模型加载设置）
     spawn=UnitreeUsdFileCfg(
-        usd_path=f"{UNITREE_MODEL_DIR}/G1/29dof/test/test/g1.usd",
+        usd_path=f"{UNITREE_MODEL_DIR}/G1/29dof/usd/g1_29dof_rev_1_0/g1_29dof_rev_1_0.usd",
     ),
     # init_state（初始状态）
     init_state=ArticulationCfg.InitialStateCfg(

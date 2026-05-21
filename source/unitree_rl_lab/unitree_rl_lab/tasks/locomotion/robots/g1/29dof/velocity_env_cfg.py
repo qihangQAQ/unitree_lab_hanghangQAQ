@@ -53,15 +53,15 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         #     step_width=0.3,
         #     platform_width=3.0,
         # ),
-        # # 2. 离散障碍物
-        # "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-        #     proportion=0.2,
-        #     horizontal_scale=0.1,
-        #     vertical_scale=0.005,
-        #     obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
-        #     obstacle_width_range=(1.0, 2.0),
-        #     num_obstacles=40,
-        # ),
+        # 2. 离散障碍物
+        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=0.2,
+            horizontal_scale=0.1,
+            vertical_scale=0.005,
+            obstacle_height_range=(0.0, 0.05), # 下界改为 0.0
+            obstacle_width_range=(1.0, 2.0),
+            num_obstacles=40,
+        ),
         # # 3. 标准阶梯
         # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
         #     proportion=0.2,
@@ -92,12 +92,12 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         #     grid_height_range=(0.0, 0.25),
         # ),
 
-        # # 坡度地形
-        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-        #     proportion=0.05,
-        #     slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
-        #     platform_width=3.0,
-        # ),
+        # 坡度地形
+        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.05,
+            slope_range=(0.15, 0.32),   # 约 8.6°‑14.3°
+            platform_width=3.0,
+        ),
         # "pit": terrain_gen.MeshPitTerrainCfg(
         #     proportion=0.05,
         #     pit_depth_range=(0.3, 0.5), # 坑深 30‑50cm
@@ -229,18 +229,33 @@ class EventCfg:
 class CommandsCfg:
     """Command specifications for the MDP."""
 
+    # base_velocity = mdp.UniformLevelVelocityCommandCfg(
+    #     asset_name="robot",
+    #     resampling_time_range=(10.0, 10.0),
+    #     rel_standing_envs=0.02,
+    #     rel_heading_envs=1.0,
+    #     heading_command=False,
+    #     debug_vis=True,
+    #     ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+    #         lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
+    #     ),
+    #     limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+    #         lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5)
+    #     ),
+    # )
+
     base_velocity = mdp.UniformLevelVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
         rel_standing_envs=0.02,
         rel_heading_envs=1.0,
-        heading_command=False,
+        heading_command=True,
         debug_vis=True,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
+            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.2, 0.2), heading=(-math.pi, math.pi),
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5)
+            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-1.57, 1.57), heading=(-math.pi, math.pi),
         ),
     )
 
@@ -533,4 +548,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
  
 
         # 放开速度命令范围进行评估
-        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 0.8)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        self.commands.base_velocity.ranges.heading = (0.0, 0.0)

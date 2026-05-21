@@ -3,35 +3,22 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 
 # ==============================================================================
-# 1) Perception-specific configuration classes
+# 1) Obstacle-specific configuration classes
 # ==============================================================================
 
 @configclass
-class RslRlPerceptionActorCriticCfg(RslRlPpoActorCriticCfg):
-    """
-    Perception-enhanced Actor-Critic configuration.
+class RslRlObstacleActorCriticCfg(RslRlPpoActorCriticCfg):
+    """Actor-Critic config with height scan + LSTM for obstacle avoidance.
 
     Extends PPO actor-critic configuration with:
     - LSTM hidden size
-    - Terrain encoder dimensions
+    - Terrain encoder dimensions (disabled at runtime)
     """
-    # Network class name (must match the class name in code)
+
     class_name: str = "ActorCriticPerception"
 
-    # New hyperparameters for perception network
     lstm_hidden_size: int = 256
     terrain_encoder_dims: list[int] = [128]
-
-
-@configclass
-class RslRlPerceptionAlgorithmCfg(RslRlPpoAlgorithmCfg):
-    """
-    Perception algorithm configuration.
-
-    Currently uses the same algorithm as PPO, but kept separate for future extensions.
-    """
-    # Algorithm class name (uses base PPO algorithm)
-    # class_name: str = "PPO"
 
 
 # ==============================================================================
@@ -39,24 +26,22 @@ class RslRlPerceptionAlgorithmCfg(RslRlPpoAlgorithmCfg):
 # ==============================================================================
 
 @configclass
-class UnitreePerceptionRunnerCfg(RslRlOnPolicyRunnerCfg):
+class UnitreeObstacleRunnerCfg(RslRlOnPolicyRunnerCfg):
     # ============== WandB Configuration ===========
     logger = "wandb"
-    wandb_project = "Unitree_g1_Velocity_Perception"
-    run_name = "Perception_Run"
-    experiment_name = "unitree_perception"
+    wandb_project = "Unitree_g1_Velocity_Obstacle"
+    run_name = "Obstacle_Run"
+    experiment_name = "unitree_obstacle"
     # ==============================================
 
-    # Runner class name (uses base OnPolicyRunner)
     class_name: str = "OnPolicyRunner"
 
-    # Basic training parameters (consistent with original PPO)
     num_steps_per_env = 24
     max_iterations = 10000
     save_interval = 100
     empirical_normalization = False
 
-    # Policy configuration with perception network
+    # Policy configuration (MLP, no LSTM)
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[256, 128],
@@ -64,20 +49,18 @@ class UnitreePerceptionRunnerCfg(RslRlOnPolicyRunnerCfg):
         activation="elu",
     )
 
-    # 设定LSTM网络
-    # policy = RslRlPerceptionActorCriticCfg(
+    # LSTM 备选方案（解封下面 + 注释上面即可切换为 LSTM 网络）
+    # policy = RslRlObstacleActorCriticCfg(
     #     init_noise_std=1.0,
     #     actor_hidden_dims=[256, 128],
     #     critic_hidden_dims=[256, 128],
     #     activation="elu",
     #     noise_std_type="log",
     #     lstm_hidden_size=256,
-    #     terrain_encoder_dims=[256, 128],
+    #     terrain_encoder_dims=[128],
     # )
 
-    # Algorithm configuration (same as PPO)
     algorithm = RslRlPpoAlgorithmCfg(
-        # Original PPO parameters
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
