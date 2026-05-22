@@ -187,7 +187,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/torso_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 1.2]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
@@ -283,13 +283,13 @@ class CommandsCfg:
         resampling_time_range=(10.0, 10.0),
         rel_standing_envs=0.02,
         rel_heading_envs=1.0,
-        heading_command=True,
+        heading_command=False,
         debug_vis=True,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.2, 0.2), heading=(-math.pi, math.pi),
+            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1),
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-1.57, 1.57), heading=(-math.pi, math.pi),
+            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5),
         ),
     )
 
@@ -335,7 +335,7 @@ class ObservationsCfg:
             },
             scale = 1.0,
             clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
-            noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
+            noise=Unoise(n_min=-0.05, n_max=0.05) # 根据 base_env_config.py 还原 0.1 的噪声
         )
 
         def __post_init__(self):
@@ -368,7 +368,7 @@ class ObservationsCfg:
             },
             scale = 1.0,
             clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
-            noise=Unoise(n_min=-0.1, n_max=0.1) # 根据 base_env_config.py 还原 0.1 的噪声
+            noise=Unoise(n_min=-0.05, n_max=0.05) # 根据 base_env_config.py 还原 0.1 的噪声
         )
 
 
@@ -633,7 +633,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         self.scene.contact_forces.update_period = self.sim.dt
-        self.scene.height_scanner.update_period = self.decimation * self.sim.dt
+        self.scene.height_scanner.update_period = 0.1
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
