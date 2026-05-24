@@ -13,7 +13,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
-from isaaclab.terrains import TerrainImporterCfg, FlatPatchSamplingCfg
+from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
@@ -69,6 +69,13 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             num_obstacles=40,
             obstacle_height_mode="fixed",
         ),
+        # 3. 标准阶梯
+        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.0, 0.2), # 下界改为 0.0
+            step_width=0.3,
+            platform_width=3.0
+        ),
         # 4. 坑洼/波浪地面
         "random_rough": terrain_gen.HfWaveTerrainCfg(
             proportion=0.2,
@@ -85,11 +92,17 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             noise_range=(0.0, 0.06),   # 最大 8cm 凹凸
             noise_step=0.02,
         ),
+        # 不规则高低地形（台阶）
+        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+            proportion=0.05,
+            grid_width=0.49,
+            grid_height_range=(0.0, 0.1),
+        ),
 
         # 坡度地形
         "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
             proportion=0.05,
-            slope_range=(0.15, 0.32),   # 约 8.6°‑14.3°
+            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
             platform_width=3.0,
         ),
         # "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
@@ -149,11 +162,6 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
 
     },
 )
-for sub_terrain_name, sub_terrain_cfg in ROUGH_TERRAINS_CFG.sub_terrains.items():
-    sub_terrain_cfg.flat_patch_sampling = {
-        "init_pos": FlatPatchSamplingCfg(num_patches=2, patch_radius=[0.01, 0.1, 0.5, 1.0], max_height_diff=0.5)
-    }
-
 @configclass
 class RobotSceneCfg(InteractiveSceneCfg):
     """Configuration for the terrain scene with a legged robot."""
@@ -241,10 +249,10 @@ class EventCfg:
     )
 
     reset_base = EventTerm(
-        func=mdp.reset_root_state_from_terrain,
+        func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"yaw": (-3.14, 3.14)},
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
@@ -266,12 +274,12 @@ class EventCfg:
     )
 
     # interval
-    # push_robot = EventTerm(
-    #     func=mdp.push_by_setting_velocity,
-    #     mode="interval",
-    #     interval_range_s=(5.0, 5.0),
-    #     params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    # )
+    push_robot = EventTerm(
+        func=mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(5.0, 5.0),
+        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+    )
 
 
 @configclass
@@ -477,7 +485,7 @@ class RewardsCfg:
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     
     # 惩罚相邻帧动作输出的变化率，促使网络输出平滑的控制信号。
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.02)
     
     # 惩罚关节速度与力矩乘积的绝对值之和，降低机器人的整体能量消耗。
     energy = RewTerm(func=mdp.energy, weight=-2e-5)
@@ -633,7 +641,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         self.scene.contact_forces.update_period = self.sim.dt
-        self.scene.height_scanner.update_period = 0.1  # self.decimation * self.sim.dt
+        self.scene.height_scanner.update_period = self.decimation * self.sim.dt
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
