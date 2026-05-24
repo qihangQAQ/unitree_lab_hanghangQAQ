@@ -18,7 +18,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
-from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
+from unitree_rl_lab.assets.robots.unitree import G1_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
 
 COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
@@ -96,7 +96,7 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         # 坡度地形
         "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
             proportion=0.05,
-            slope_range=(0.15, 0.45),   # 约 8.6°‑14.3°
+            slope_range=(0.15, 0.35),   # 约 8.6°‑14.3°
             platform_width=3.0,
         ),
         # "pit": terrain_gen.MeshPitTerrainCfg(
@@ -166,7 +166,7 @@ class EventCfg:
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
             "static_friction_range": (0.3, 1.0),
             "dynamic_friction_range": (0.3, 1.0),
-            "restitution_range": (0.0, 0.0),
+            "restitution_range": (0.0, 0.005),
             "num_buckets": 64,
         },
     )
@@ -176,7 +176,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "mass_distribution_params": (-1.0, 3.0),
+            "mass_distribution_params": (-5.0, 5.0),
             "operation": "add",
         },
     )
@@ -198,12 +198,12 @@ class EventCfg:
         params={
             "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
             },
         },
     )
@@ -212,7 +212,7 @@ class EventCfg:
         func=mdp.reset_joints_by_scale,
         mode="reset",
         params={
-            "position_range": (1.0, 1.0),
+            "position_range": (0.5, 1.5),
             "velocity_range": (-1.0, 1.0),
         },
     )
@@ -222,26 +222,32 @@ class EventCfg:
         func=mdp.push_by_setting_velocity,
         mode="interval",
         interval_range_s=(5.0, 5.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+        params={"velocity_range": {"x": (-1.0, 1.0), "y": (-1.0, 1.0)}},
     )
 
 
 @configclass
 class CommandsCfg:
-    """Command specifications for the MDP."""
+    """Command specifications for the MDP  (LeggedLab-aligned: heading-based angular velocity)."""
 
     base_velocity = mdp.UniformLevelVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.02,
+        rel_standing_envs=0.2,
         rel_heading_envs=1.0,
-        heading_command=False,
+        heading_command=True,
+        heading_control_stiffness=0.5,
         debug_vis=True,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
+            lin_vel_x=(-0.6, 1.0),
+            lin_vel_y=(-0.5, 0.5),
+            ang_vel_z=(-1.57, 1.57),
+            heading=(-3.1416, 3.1416),
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5)
+            lin_vel_x=(-0.6, 1.0),
+            lin_vel_y=(-0.5, 0.5),
+            ang_vel_z=(-1.57, 1.57),
         ),
     )
 
@@ -264,7 +270,7 @@ class ObservationsCfg:
         """Observations for policy group."""
 
         # observation terms (order preserved)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2, noise=Unoise(n_min=-0.2, n_max=0.2))
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=1.0, noise=Unoise(n_min=-0.2, n_max=0.2))
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
@@ -324,118 +330,164 @@ class ObservationsCfg:
 
 @configclass
 class RewardsCfg:
-    """Reward terms for the MDP."""
+    """Reward terms for the MDP  (LeggedLab-aligned structure)."""
 
-    # -- task
-    track_lin_vel_xy = RewTerm(
+    # ==========================================
+    # 1. 任务与存活 (Task & Survival)
+    # ==========================================
+
+    # 鼓励机器人跟踪目标水平面内的线速度指令（X、Y 方向）。
+    track_lin_vel_xy_exp = RewTerm(
         func=mdp.track_lin_vel_xy_yaw_frame_exp,
         weight=1.0,
-        params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
+        params={"command_name": "base_velocity", "std": 0.5},
     )
-    track_ang_vel_z = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+    # 鼓励机器人跟踪目标偏航角速度指令（Z 轴旋转），使用 world 坐标系。
+    track_ang_vel_z_exp = RewTerm(
+        func=mdp.track_ang_vel_z_world_exp,
+        weight=1.0,
+        params={"command_name": "base_velocity", "std": 0.5},
     )
-    # 正向奖励，鼓励机器人保持存活（未触发终止条件）。
-    alive = RewTerm(func=mdp.is_alive, weight=0.15)
+    # 强烈惩罚回合终止，促使机器人尽可能长时间存活。
+    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
 
-    # -- base
-    # 惩罚基座在Z方向的线速度，防止机器人上下跳动。
-    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    # 惩罚基座绕X、Y轴的角速度，抑制俯仰与滚转方向的转动。
-    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    # 惩罚关节速度的平方和，限制关节转动过快。
-    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
-    # 惩罚关节加速度的平方和，抑制关节运动的突变。
+    # ==========================================
+    # 2. 基座与姿态 (Base & Posture)
+    # ==========================================
+
+    # 惩罚基座在 Z 方向的线速度，防止上下跳动。
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-1.0)
+    # 惩罚基座绕 X、Y 轴的角速度，抑制俯仰与滚转晃动。
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    # 惩罚基座倾斜（重力投影），鼓励躯干在水平面上保持直立。
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
+    # 惩罚躯干连杆自身倾斜，进一步稳定上半身姿态。
+    body_orientation_l2 = RewTerm(
+        func=mdp.body_orientation_l2,
+        weight=-2.0,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=".*torso.*")},
+    )
+    # 惩罚非脚踝部位与地面的接触（如躯干、手臂等）。
+    undesired_contacts = RewTerm(
+        func=mdp.undesired_contacts,
+        weight=-1.0,
+        params={
+            "threshold": 1.0,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names="(?!.*ankle.*).*"),
+        },
+    )
+    # 惩罚双脚同时离地（腾空），避免跳跃。
+    fly = RewTerm(
+        func=mdp.fly,
+        weight=-1.0,
+        params={
+            "threshold": 1.0,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+        },
+    )
+
+    # ==========================================
+    # 3. 关节控制与平滑 (Joints & Regularization)
+    # ==========================================
+
+    # 惩罚过大的关节加速度，抑制关节运动的突然抖动。
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    # 惩罚动作的变化率，促使控制信号平滑。
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05)
-    # 惩罚关节位置超出软限位的程度，保护机械结构。
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
+    # 惩罚相邻帧动作输出的变化率，促使控制信号平滑。
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    # 惩罚关节位置超出软限位，保护机械结构。
+    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-2.0)
     # 惩罚能量消耗（关节速度与力矩乘积的绝对值之和）。
-    energy = RewTerm(func=mdp.energy, weight=-2e-5)
-
-    # 惩罚手臂关节偏离默认位置（L1偏差），鼓励回到中立姿态。
-    joint_deviation_arms = RewTerm(
+    energy = RewTerm(func=mdp.energy, weight=-1e-3)
+    # 惩罚髋、肩、肘关节偏离中立位置。
+    joint_deviation_hip = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.5,
+        weight=-0.15,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
                 joint_names=[
-                    ".*_shoulder_.*_joint",
-                    ".*_elbow_joint",
-                    ".*_wrist_.*",
+                    ".*_hip_yaw.*",
+                    ".*_hip_roll.*",
+                    ".*_shoulder_pitch.*",
+                    ".*_elbow.*",
                 ],
             )
         },
     )
-    # 惩罚腰部关节偏离默认位置，保持腰部姿态。
-    joint_deviation_waists = RewTerm(
+    # 惩罚手臂和腰部关节偏离中立位置。
+    joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1,
+        weight=-0.2,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
                 joint_names=[
                     "waist.*",
+                    ".*_shoulder_roll.*",
+                    ".*_shoulder_yaw.*",
+                    ".*_wrist.*",
                 ],
             )
         },
     )
-    # 惩罚特定腿部关节（如髋关节）偏离默认位置。
+    # 惩罚腿部关节（髋 pitch、膝、踝）偏离中立位置。
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
+        weight=-0.02,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=[".*_hip_pitch.*", ".*_knee.*", ".*_ankle.*"],
+            )
+        },
     )
 
-    # -- robot
-    # 惩罚基座倾斜，通过重力投影在水平面的分量鼓励保持直立。
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
-    # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
-    # base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
+    # ==========================================
+    # 4. 足端与步态 (Feet & Gait)
+    # ==========================================
 
-    # -- feet
-    # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
-    gait = RewTerm(
-        func=mdp.feet_gait,
-        weight=0.5,
+    # 鼓励单脚支撑时合理的步态切换节奏（LeggedLab 风格：不依赖 phase）。
+    feet_air_time = RewTerm(
+        func=mdp.feet_air_time_positive_biped,
+        weight=0.15,
         params={
-            "period": 0.8,
-            "offset": [0.0, 0.5],
-            "threshold": 0.55,
             "command_name": "base_velocity",
+            "threshold": 0.4,
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
     # 惩罚脚在接触地面时的水平滑动，防止打滑。
     feet_slide = RewTerm(
         func=mdp.feet_slide,
-        weight=-0.2,
+        weight=-0.25,
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll.*"),
         },
     )
-    # 正向奖励，鼓励摆动脚在离地阶段达到目标离地高度。
-    feet_clearance = RewTerm(
-        func=mdp.foot_clearance_reward,
-        weight=1.0,
+    # 惩罚脚部撞击竖直障碍物或台阶边缘，防止绊倒。
+    feet_stumble = RewTerm(
+        func=mdp.feet_stumble,
+        weight=-2.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*")},
+    )
+    # 惩罚双脚距离过近，避免自碰撞。
+    feet_too_near = RewTerm(
+        func=mdp.feet_too_near,
+        weight=-2.0,
         params={
-            "std": 0.05,
-            "tanh_mult": 2.0,
-            "target_height": 0.1,
+            "threshold": 0.2,
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
         },
     )
-
-    # 惩罚除脚踝外其他身体部位与地面的接触，避免意外碰撞。
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1,
+    # 惩罚足端着地时产生过大的冲击力，促使软着陆。
+    feet_force = RewTerm(
+        func=mdp.feet_contact_force_penalty,
+        weight=-3e-3,
         params={
-            "threshold": 1,
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+            "threshold": 500.0,
+            "max_excess": 400.0,
         },
     )
 
@@ -445,16 +497,19 @@ class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.2})
-    bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
-
+    # base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.2})
+    # bad_orientation = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.8})
+    base_contact = DoneTerm(
+        func=mdp.illegal_contact,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*torso.*"), "threshold": 1.0},
+    )
 
 @configclass
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
+    # lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
 
 
 @configclass
