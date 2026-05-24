@@ -61,6 +61,7 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             obstacle_height_range=(0.0, 0.08), # 下界改为 0.0
             obstacle_width_range=(1.0, 2.0),
             num_obstacles=40,
+            obstacle_height_mode="fixed",
         ),
         # # 3. 标准阶梯
         # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
@@ -95,7 +96,7 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         # 坡度地形
         "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
             proportion=0.05,
-            slope_range=(0.15, 0.32),   # 约 8.6°‑14.3°
+            slope_range=(0.15, 0.45),   # 约 8.6°‑14.3°
             platform_width=3.0,
         ),
         # "pit": terrain_gen.MeshPitTerrainCfg(
@@ -244,21 +245,6 @@ class CommandsCfg:
         ),
     )
 
-    # base_velocity = mdp.UniformLevelVelocityCommandCfg(
-    #     asset_name="robot",
-    #     resampling_time_range=(10.0, 10.0),
-    #     rel_standing_envs=0.02,
-    #     rel_heading_envs=1.0,
-    #     heading_command=True,
-    #     debug_vis=True,
-    #     ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-    #         lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.2, 0.2), heading=(-math.pi, math.pi),
-    #     ),
-    #     limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-    #         lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-1.57, 1.57), heading=(-math.pi, math.pi),
-    #     ),
-    # )
-
 
 @configclass
 class ActionsCfg:
@@ -371,7 +357,7 @@ class RewardsCfg:
     # 惩罚手臂关节偏离默认位置（L1偏差），鼓励回到中立姿态。
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.1,
+        weight=-0.5,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
@@ -407,7 +393,7 @@ class RewardsCfg:
     # 惩罚基座倾斜，通过重力投影在水平面的分量鼓励保持直立。
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
     # 惩罚基座高度偏离目标值（0.78），控制机器人站立高度。
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
+    # base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
 
     # -- feet
     # 正向奖励，根据相位和接触状态鼓励脚部按步态周期正确着地
@@ -548,7 +534,4 @@ class RobotPlayEnvCfg(RobotEnvCfg):
  
 
         # 放开速度命令范围进行评估
-        self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 0.8)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
-        self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges

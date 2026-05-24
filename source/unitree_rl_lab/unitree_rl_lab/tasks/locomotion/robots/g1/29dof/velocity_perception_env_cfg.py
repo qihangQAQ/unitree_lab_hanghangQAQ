@@ -633,7 +633,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         self.scene.contact_forces.update_period = self.sim.dt
-        self.scene.height_scanner.update_period = 0.1
+        self.scene.height_scanner.update_period = 0.1  # self.decimation * self.sim.dt
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
@@ -649,7 +649,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
 class RobotPlayEnvCfg(RobotEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 32
+        self.scene.num_envs = 16
         
         # --- 核心地形难度控制 ---
         
@@ -661,7 +661,7 @@ class RobotPlayEnvCfg(RobotEnvCfg):
         # self.scene.terrain.terrain_generator.num_rows = 10
         # self.scene.terrain.terrain_generator.num_cols = 20
 
-        self.scene.terrain.terrain_generator.num_rows = 8
+        self.scene.terrain.terrain_generator.num_rows = 4
         self.scene.terrain.terrain_generator.num_cols = 4
 
         # 2. 锁定地形难度（最低难度0 - 最高难度1）
