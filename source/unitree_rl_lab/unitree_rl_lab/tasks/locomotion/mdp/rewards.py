@@ -1206,3 +1206,11 @@ def body_orientation_l2(
         asset.data.GRAVITY_VEC_W,
     )
     return torch.sum(torch.square(body_orientation[:, :2]), dim=1)
+
+
+
+def action_rate_l2_safe(env: ManagerBasedRLEnv, clip_value: float = 1.0) -> torch.Tensor:
+    """Penalize action rate with clipped actions to prevent explosion from unbounded raw actions."""
+    action = torch.clamp(env.action_manager.action, -clip_value, clip_value)
+    prev_action = torch.clamp(env.action_manager.prev_action, -clip_value, clip_value)
+    return torch.sum(torch.square(action - prev_action), dim=1)

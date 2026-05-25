@@ -13,8 +13,8 @@ KEY_VEL = {
     "S":   {"cmd": "lin_vel_x",  "val": -0.5},  # 后退
     "A":   {"cmd": "lin_vel_y",  "val":  0.3},  # 左移
     "D":   {"cmd": "lin_vel_y",  "val": -0.3},  # 右移
-    "Q":   {"cmd": "ang_vel_z",  "val":  0.5},  # 左转
-    "E":   {"cmd": "ang_vel_z",  "val": -0.5},  # 右转
+    "Q":   {"cmd": "ang_vel_z",  "val":  2.4},  # 左转
+    "E":   {"cmd": "ang_vel_z",  "val": -2.4},  # 右转
 }
 SHIFT_SPEED_SCALE = 2.0   # 按住 Shift 时的速度倍率
 # =====================================================================
@@ -300,6 +300,18 @@ def main():
     command_term.is_heading_env[:] = False
     command_term.time_left[:] = 1e9
 
+    # -- Inject zero initial command + flush observation history
+    # Without this, the policy sees random commands from env reset in its
+    # initial observation (and in the history_length=5 buffer), causing
+    # wild first actions that deviate the robot from the intended path.
+    command_term.vel_command_b[:, 0] = 0.0
+    command_term.vel_command_b[:, 1] = 0.0
+    command_term.vel_command_b[:, 2] = 0.0
+    for _ in range(env_cfg.observations.policy.history_length):
+        obs = env.get_observations()
+    if version("rsl-rl-lib").startswith("2.3."):
+        obs = obs[0] if isinstance(obs, tuple) else obs
+
     # -- Start keyboard reader
     kb = KeyboardReader()
     kb.start()
@@ -313,10 +325,6 @@ def main():
         q=KEY_VEL["Q"], e=KEY_VEL["E"], scale=SHIFT_SPEED_SCALE))
     print("  Release all keys to stop.  Ctrl-C to exit.")
     print("=" * 60 + "\n")
-
-    obs = env.get_observations()
-    if version("rsl-rl-lib").startswith("2.3."):
-        obs, _ = env.get_observations()
 
     timestep = 0
 

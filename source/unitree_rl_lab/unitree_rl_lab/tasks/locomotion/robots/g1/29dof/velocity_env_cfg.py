@@ -257,7 +257,8 @@ class ActionsCfg:
     """Action specifications for the MDP."""
 
     JointPositionAction = mdp.JointPositionActionCfg(
-        asset_name="robot", joint_names=[".*"], scale=0.25, use_default_offset=True
+        asset_name="robot", joint_names=[".*"], scale=0.25, use_default_offset=True,
+        clip={".*": (-1.0, 1.0)},
     )
 
 
@@ -393,7 +394,7 @@ class RewardsCfg:
     # 惩罚过大的关节加速度，抑制关节运动的突然抖动。
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     # 惩罚相邻帧动作输出的变化率，促使控制信号平滑。
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    action_rate = RewTerm(func=mdp.action_rate_l2_safe, weight=-0.01, params={"clip_value": 1.0})
     # 惩罚关节位置超出软限位，保护机械结构。
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-2.0)
     # 惩罚能量消耗（关节速度与力矩乘积的绝对值之和）。
@@ -588,5 +589,4 @@ class RobotPlayEnvCfg(RobotEnvCfg):
             self.curriculum.terrain_levels = None
  
 
-        # 放开速度命令范围进行评估
-        self.commands.base_velocity.ranges = self.commands.base_velocity.limit_ranges
+        # 命令范围已在 CommandsCfg 中一步到位，无需从 limit_ranges 覆盖
