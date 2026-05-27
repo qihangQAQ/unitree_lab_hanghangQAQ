@@ -1206,3 +1206,29 @@ def body_orientation_l2(
         asset.data.GRAVITY_VEC_W,
     )
     return torch.sum(torch.square(body_orientation[:, :2]), dim=1)
+
+
+def cross_axis_leakage(
+    env: ManagerBasedRLEnv,
+    command_name: str = "base_velocity",
+    sigma: float = 0.15,
+) -> torch.Tensor:
+    """Penalize velocity on axes that are not commanded.
+
+    When the command is pure linear (x/y), penalize base angular velocity z.
+    When the command is pure angular (z), penalize base linear velocity xy.
+    When standing (all-zero command), no penalty is applied.
+    """
+    cmd = env.command_manager.get_command(command_name)  # (num_envs, 3)
+    base_ang_vel = env.scene["robot"].data.root_ang_vel_b[:, 2]
+    base_lin_vel_xy = torch.norm(env.scene["robot"].data.root_lin_vel_b[:, :2], dim=-1)
+
+    is_lin_cmd = (torch.abs(cmd[:, 0]) > 1e-3) | (torch.abs(cmd[:, 1]) > 1e-3)
+    is_ang_cmd = torch.abs(cmd[:, 2]) > 1e-3
+    is_standing = ~is_lin_cmd & ~is_ang_cmd
+
+    reward = torch.ones_like(base_ang_vel)
+    reward = torch.where(is_lin_cmd, torch.exp(-torch.abs(base_ang_vel) / sigma), reward)
+    reward = torch.where(is_ang_cmd, torch.exp(-base_lin_vel_xy / sigma), reward)
+    reward = torch.where(is_standing, 1.0, reward)
+    return reward

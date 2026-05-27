@@ -230,24 +230,23 @@ class EventCfg:
 class CommandsCfg:
     """Command specifications for the MDP  (LeggedLab-aligned: heading-based angular velocity)."""
 
-    base_velocity = mdp.UniformLevelVelocityCommandCfg(
+    base_velocity = mdp.DiscreteAxisLevelVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
         rel_standing_envs=0.2,
         rel_heading_envs=1.0,
-        heading_command=True,
+        heading_command=False,
         heading_control_stiffness=0.5,
         debug_vis=True,
-        ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.6, 1.0),
-            lin_vel_y=(-0.5, 0.5),
-            ang_vel_z=(-1.57, 1.57),
-            heading=(-3.1416, 3.1416),
+        ranges=mdp.DiscreteAxisLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(-0.1, 0.1),
+            lin_vel_y=(-0.1, 0.1),
+            ang_vel_z=(-0.1, 0.1),
         ),
-        limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.6, 1.0),
+        limit_ranges=mdp.DiscreteAxisLevelVelocityCommandCfg.Ranges(
+            lin_vel_x=(-0.5, 1.0),
             lin_vel_y=(-0.5, 0.5),
-            ang_vel_z=(-1.57, 1.57),
+            ang_vel_z=(-1.0, 1.0),
         ),
     )
 
@@ -347,6 +346,12 @@ class RewardsCfg:
         func=mdp.track_ang_vel_z_world_exp,
         weight=1.0,
         params={"command_name": "base_velocity", "std": 0.5},
+    )
+    # 惩罚命令未要求的轴上产生运动泄漏（前进时不该转，旋转时不该漂）。
+    cross_axis_leakage = RewTerm(
+        func=mdp.cross_axis_leakage,
+        weight=0.35,
+        params={"command_name": "base_velocity", "sigma": 0.15},
     )
     # 强烈惩罚回合终止，促使机器人尽可能长时间存活。
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
@@ -509,7 +514,8 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    # lin_vel_cmd_levels = CurrTerm(mdp.lin_vel_cmd_levels)
+    lin_vel_cmd_levels = CurrTerm(func=mdp.lin_vel_cmd_levels, params={"reward_term_name": "track_lin_vel_xy_exp"})
+    ang_vel_cmd_levels = CurrTerm(func=mdp.ang_vel_cmd_levels, params={"reward_term_name": "track_ang_vel_z_exp"})
 
 
 @configclass
