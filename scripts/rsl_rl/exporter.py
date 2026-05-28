@@ -74,7 +74,10 @@ class _TorchPolicyExporter(torch.nn.Module):
             if self.attach_global:
                 self.global_encoder = copy.deepcopy(policy.global_encoder)
                 self.query_projector = copy.deepcopy(policy.query_projector)
-            
+            else:
+                self.global_encoder = None
+                self.query_projector = None
+
             # Move modules to CPU
             self.map_cnn.cpu()
             self.mha.cpu()
@@ -197,8 +200,14 @@ class _TorchPolicyExporter(torch.nn.Module):
         os.makedirs(path, exist_ok=True)
         path = os.path.join(path, filename)
         self.to("cpu")
-        traced_script_module = torch.jit.script(self)
-        traced_script_module.save(path)
+        self.eval()
+        if self.has_terrain_encoder:
+            input_dim = self.actor_proprio_dim + (self.L * self.W * self.coord_dim)
+            example_input = torch.zeros(1, input_dim)
+        else:
+            example_input = torch.zeros(1, self.actor[0].in_features)
+        traced_module = torch.jit.trace(self, example_input)
+        traced_module.save(path)
 
 
 class _OnnxPolicyExporter(torch.nn.Module):
@@ -228,7 +237,10 @@ class _OnnxPolicyExporter(torch.nn.Module):
             if self.attach_global:
                 self.global_encoder = copy.deepcopy(policy.global_encoder)
                 self.query_projector = copy.deepcopy(policy.query_projector)
-            
+            else:
+                self.global_encoder = None
+                self.query_projector = None
+
             self.map_cnn.cpu()
             self.mha.cpu()
             self.actor_proprio_embedding.cpu()

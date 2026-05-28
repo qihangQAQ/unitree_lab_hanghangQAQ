@@ -8,16 +8,13 @@ from torch.distributions import Normal
 
 class ActorCriticPerception(ActorCriticRecurrent):
     """
-    Perception-enhanced Actor-Critic network (terrain encoder disabled).
+    Perception-enhanced Actor-Critic network with terrain encoder + LSTM.
 
-    NOTE: Terrain encoder functionality has been commented out.
-    Original design extended ActorCriticRecurrent with terrain encoding capabilities:
-    1) Terrain encoder: MLP that encodes 187D height map to terrain features
-    2) Shared terrain features for both actor and critic
-    3) Proper integration with RNN memory modules for sequence processing
-
-    Modified network pipeline (encoder disabled):
-    Raw observations (including height map) → RNN memory (LSTM) → MLP heads
+    Network pipeline:
+    Raw obs → split into [proprioception | height_map(187D)]
+                → terrain encoder (MLP) → terrain features
+                → concat [proprioception | terrain_features]
+                → LSTM memory → MLP heads (actor/critic)
     """
 
     def __init__(
@@ -30,7 +27,7 @@ class ActorCriticPerception(ActorCriticRecurrent):
         actor_hidden_dims=[256, 128],
         critic_hidden_dims=[256, 128],
         lstm_hidden_size=256,
-        terrain_encoder_dims=[128],  # 编码器维度参数（已注释掉编码器功能）
+        terrain_encoder_dims=[128],  # Terrain encoder MLP hidden dims, final dim = terrain feature dim
         activation="elu",
         init_noise_std=1.0,
         noise_std_type: str = "scalar",
@@ -46,7 +43,7 @@ class ActorCriticPerception(ActorCriticRecurrent):
             actor_hidden_dims: MLP hidden dimensions for actor head (after RNN)
             critic_hidden_dims: MLP hidden dimensions for critic head (after RNN)
             lstm_hidden_size: Hidden size for LSTM memory (maps to rnn_hidden_dim)
-            terrain_encoder_dims: MLP dimensions for terrain encoder (ignored - encoder functionality disabled)
+            terrain_encoder_dims: MLP dimensions for terrain encoder (e.g. [256, 128])
             activation: Activation function for MLP layers
             init_noise_std: Initial standard deviation for action noise
             noise_std_type: Type of noise parameterization ("scalar" or "log")
@@ -56,20 +53,25 @@ class ActorCriticPerception(ActorCriticRecurrent):
         kwargs['rnn_hidden_dim'] = lstm_hidden_size
         kwargs['rnn_type'] = 'lstm'  # Explicitly use LSTM
 
-        # Store terrain encoder dimensions before calling parent init
-        # 编码器功能已注释掉，保留参数但不使用
-        # self.terrain_encoder_dims = terrain_encoder_dims
-        # self.terrain_input_dim = 187  # Fixed: 17x11 height map
-        self.terrain_encoder_dims = terrain_encoder_dims  # 保留参数但不使用
-        self.terrain_input_dim = 187  # 保留但不使用
+        # Store terrain encoder parameters
+        self.terrain_encoder_dims = terrain_encoder_dims
+        self.terrain_input_dim = 187  # Fixed: 17x11 height map (187 scan dots)
 
-        # Calculate observation dimensions without terrain
-        # 修改：使用原始观测维度，不减去地形维度（编码器功能已注释掉）
+        # DEBUG: inspect obs_groups structure and obs shapes
+        print(f"[DEBUG] obs keys: {list(obs.keys())}")
+        print(f"[DEBUG] obs_groups['policy']: {obs_groups['policy']}")
+        print(f"[DEBUG] obs_groups['critic']: {obs_groups['critic']}")
+        for g in obs_groups["policy"]:
+            print(f"[DEBUG] obs['{g}'].shape: {obs[g].shape}")
+        for g in obs_groups["critic"]:
+            print(f"[DEBUG] obs['{g}'].shape: {obs[g].shape}")
+
+        # Calculate observation dimensions WITHOUT terrain (proprioception only)
         self.actor_obs_dim_no_terrain = self._calculate_obs_dim_no_terrain(
-            obs, obs_groups["policy"], terrain_dim=0  # 改为0，使用完整维度
+            obs, obs_groups["policy"], terrain_dim=187
         )
         self.critic_obs_dim_no_terrain = self._calculate_obs_dim_no_terrain(
-            obs, obs_groups["critic"], terrain_dim=0  # 改为0，使用完整维度
+            obs, obs_groups["critic"], terrain_dim=187
         )
 
         # Call parent class initialization (creates memory_a, memory_c, actor, critic)
@@ -88,25 +90,20 @@ class ActorCriticPerception(ActorCriticRecurrent):
         )
 
         # Build terrain encoder (shared between actor and critic)
-        # 编码器功能已注释掉
-        # self.terrain_encoder = self._build_terrain_encoder(terrain_encoder_dims, activation)
-        # 编码器输出设定 -- 按照默认配置 [256, 128]，输出维度为 128
-        # self.terrain_feat_dim = terrain_encoder_dims[-1]
-        self.terrain_encoder = None  # 编码器已禁用
-        self.terrain_feat_dim = 0    # 特征维度为0
+        self.terrain_encoder = self._build_terrain_encoder(terrain_encoder_dims, activation)
+        self.terrain_feat_dim = terrain_encoder_dims[-1]
 
-        # Calculate encoded observation dimensions
-        # 修改：编码观测维度等于原始观测维度（无编码器）
-        self.encoded_actor_obs_dim = self.actor_obs_dim_no_terrain  # 直接使用原始维度
-        self.encoded_critic_obs_dim = self.critic_obs_dim_no_terrain  # 直接使用原始维度
+        # Calculate encoded observation dimensions (proprioception + terrain features)
+        self.encoded_actor_obs_dim = self.actor_obs_dim_no_terrain + self.terrain_feat_dim
+        self.encoded_critic_obs_dim = self.critic_obs_dim_no_terrain + self.terrain_feat_dim
 
         print(f"[ActorCriticPerception] Original actor obs dim: {self._get_original_actor_obs_dim(obs, obs_groups)}")
         print(f"[ActorCriticPerception] Original critic obs dim: {self._get_original_critic_obs_dim(obs, obs_groups)}")
-        print(f"[ActorCriticPerception] Actor obs dim (no terrain): {self.actor_obs_dim_no_terrain} (编码器功能已注释掉)")
-        print(f"[ActorCriticPerception] Critic obs dim (no terrain): {self.critic_obs_dim_no_terrain} (编码器功能已注释掉)")
-        print(f"[ActorCriticPerception] Terrain feature dim: {self.terrain_feat_dim} (编码器已禁用)")
-        print(f"[ActorCriticPerception] Encoded actor obs dim: {self.encoded_actor_obs_dim} (等于原始维度)")
-        print(f"[ActorCriticPerception] Encoded critic obs dim: {self.encoded_critic_obs_dim} (等于原始维度)")
+        print(f"[ActorCriticPerception] Actor obs dim (no terrain): {self.actor_obs_dim_no_terrain}")
+        print(f"[ActorCriticPerception] Critic obs dim (no terrain): {self.critic_obs_dim_no_terrain}")
+        print(f"[ActorCriticPerception] Terrain feat dim: {self.terrain_feat_dim}")
+        print(f"[ActorCriticPerception] Encoded actor obs dim (→LSTM): {self.encoded_actor_obs_dim}")
+        print(f"[ActorCriticPerception] Encoded critic obs dim (→LSTM): {self.encoded_critic_obs_dim}")
 
         # Recreate memory modules with encoded observation dimensions
         self._recreate_memory_modules()
@@ -114,9 +111,9 @@ class ActorCriticPerception(ActorCriticRecurrent):
         # Recreate observation normalizers if needed
         self._recreate_observation_normalizers()
 
-        print(f"[ActorCriticPerception] Terrain encoder: {self.terrain_encoder} (编码器已禁用)")
-        print(f"[ActorCriticPerception] Memory_a input size updated to: {self.encoded_actor_obs_dim} (原始观测直接输入LSTM)")
-        print(f"[ActorCriticPerception] Memory_c input size updated to: {self.encoded_critic_obs_dim} (原始观测直接输入LSTM)")
+        print(f"[ActorCriticPerception] Terrain encoder: {self.terrain_encoder}")
+        print(f"[ActorCriticPerception] Memory_a input size (→LSTM): {self.encoded_actor_obs_dim}")
+        print(f"[ActorCriticPerception] Memory_c input size (→LSTM): {self.encoded_critic_obs_dim}")
 
     def _calculate_obs_dim_no_terrain(self, obs, obs_group_names, terrain_dim=187):
         """Calculate total observation dimension (terrain_dim=0 when encoder disabled)."""
@@ -262,31 +259,29 @@ class ActorCriticPerception(ActorCriticRecurrent):
             # Replace the identity normalizer with empirical normalizer
             self.critic_obs_normalizer = EmpiricalNormalization(self.encoded_critic_obs_dim)
 
-    # 构建Actor观测 -- 直接返回原始观测（编码器功能已注释掉）
     def get_actor_obs(self, obs):
         """
-        Get actor observations without terrain encoding.
+        Split observations into proprioception + terrain, encode terrain, then concatenate.
 
-        Returns raw observations directly to Actor network (LSTM structure preserved).
+        Returns: [proprioception | terrain_features] → fed to LSTM memory
         """
-        # Get raw concatenated observations from parent class
         raw_obs = super().get_actor_obs(obs)
+        proprio_obs = raw_obs[..., :self.actor_obs_dim_no_terrain]
+        terrain_obs = raw_obs[..., self.actor_obs_dim_no_terrain:]
+        terrain_features = self.terrain_encoder(terrain_obs)
+        return torch.cat([proprio_obs, terrain_features], dim=-1)
 
-        # 编码器功能已注释掉，直接返回原始观测
-        return raw_obs
-
-    #构建Critic观测 -- 直接返回原始观测（编码器功能已注释掉）
     def get_critic_obs(self, obs):
         """
-        Get critic observations without terrain encoding.
+        Split observations into proprioception + terrain, encode terrain, then concatenate.
 
-        Returns raw observations directly to Critic network (LSTM structure preserved).
+        Returns: [proprioception | terrain_features] → fed to LSTM memory
         """
-        # Get raw concatenated observations from parent class
         raw_obs = super().get_critic_obs(obs)
-
-        # 编码器功能已注释掉，直接返回原始观测
-        return raw_obs
+        proprio_obs = raw_obs[..., :self.critic_obs_dim_no_terrain]
+        terrain_obs = raw_obs[..., self.critic_obs_dim_no_terrain:]
+        terrain_features = self.terrain_encoder(terrain_obs)
+        return torch.cat([proprio_obs, terrain_features], dim=-1)
 
     # Note: All other methods (act, evaluate, update_distribution, etc.) are inherited
     # from ActorCriticRecurrent and will automatically use our overridden

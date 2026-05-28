@@ -286,18 +286,34 @@ class EventCfg:
 class CommandsCfg:
     """Command specifications for the MDP."""
 
-    base_velocity = mdp.UniformLevelVelocityCommandCfg(
+    # base_velocity = mdp.UniformLevelVelocityCommandCfg(
+    #     asset_name="robot",
+    #     resampling_time_range=(10.0, 10.0),
+    #     rel_standing_envs=0.02,
+    #     rel_heading_envs=1.0,
+    #     heading_command=False,
+    #     debug_vis=True,
+    #     ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+    #         lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1),
+    #     ),
+    #     limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
+    #         lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5),
+    #     ),
+    # )
+
+    base_velocity = mdp.UniformVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.02,
+        rel_standing_envs=0.0,
         rel_heading_envs=1.0,
-        heading_command=False,
+        heading_command=True,
+        heading_control_stiffness=0.5,
         debug_vis=True,
-        ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1),
-        ),
-        limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5),
+        ranges=mdp.UniformVelocityCommandCfg.Ranges(
+            lin_vel_x=(-1.0, 1.0),
+            lin_vel_y=(-1.0, 1.0),
+            ang_vel_z=(-1.0, 1.0),
+            heading=(-math.pi, math.pi),
         ),
     )
 
@@ -347,7 +363,7 @@ class ObservationsCfg:
         )
 
         def __post_init__(self):
-            self.history_length = 5
+            self.history_length = 1
             self.enable_corruption = True
             self.concatenate_terms = True
 
@@ -366,7 +382,7 @@ class ObservationsCfg:
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         last_action = ObsTerm(func=mdp.last_action)
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
-        
+
         # 高度扫描（187）
         height_scanner = ObsTerm(
             func=mdp.height_scan_hpc,
@@ -381,7 +397,7 @@ class ObservationsCfg:
 
 
         def __post_init__(self):
-            self.history_length = 5
+            self.history_length = 1
 
     # privileged observations
     critic: CriticCfg = CriticCfg()
@@ -608,7 +624,7 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    lin_vel_cmd_levels = CurrTerm(func=mdp.lin_vel_cmd_levels)
+    # lin_vel_cmd_levels = CurrTerm(func=mdp.lin_vel_cmd_levels)
 
 
 @configclass
@@ -641,7 +657,7 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         self.scene.contact_forces.update_period = self.sim.dt
-        self.scene.height_scanner.update_period = self.decimation * self.sim.dt
+        self.scene.height_scanner.update_period = 0.1
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training

@@ -24,7 +24,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
-from unitree_rl_lab.assets.robots.unitree import G1_CFG as ROBOT_CFG
+from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
 from unitree_rl_lab.tasks.locomotion.mdp.terrain.loco_hf_terrains import HfConcentricGapTerrainCfg
 
@@ -697,11 +697,13 @@ class AMEPlayEnvCfg(AMEEnvCfg):
         super().__post_init__()
 
         # Smaller scene for play
-        self.scene.num_envs = 50
+        self.scene.num_envs = 1
         self.scene.env_spacing = 2.5
         self.episode_length_s = 40.0
 
-        # Lock terrain difficulty
+        # Use flat terrain to reduce Vulkan rendering pressure
+        self.scene.terrain.terrain_type = "plane"
+        self.scene.terrain.terrain_generator = None
         self.scene.terrain.max_init_terrain_level = None
 
         # Disable terrain curriculum
