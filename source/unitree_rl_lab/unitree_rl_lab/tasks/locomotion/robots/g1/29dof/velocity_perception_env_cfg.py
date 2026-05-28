@@ -43,123 +43,76 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
 )
 
 ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
+    curriculum=True,
     size=(8.0, 8.0),
     border_width=20.0,
-    num_rows=10,  
-    num_cols=20,  
+    num_rows=10,
+    num_cols=20,
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
     use_cache=False,
     sub_terrains={
-        # 1. 随机金字塔阶梯
-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.23), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0,
-        ),
-        # 2. 离散障碍物
-        "discrete_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-            proportion=0.2,
-            horizontal_scale=0.1,
-            vertical_scale=0.005,
-            obstacle_height_range=(0.0, 0.2), # 下界改为 0.0
-            obstacle_width_range=(1.0, 2.0),
-            num_obstacles=40,
-            obstacle_height_mode="fixed",
-        ),
-        # 3. 标准阶梯
-        "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.0, 0.2), # 下界改为 0.0
-            step_width=0.3,
-            platform_width=3.0
-        ),
-        # 4. 坑洼/波浪地面
-        "random_rough": terrain_gen.HfWaveTerrainCfg(
-            proportion=0.2,
-            horizontal_scale=0.1,
-            vertical_scale=0.005,
-            amplitude_range=(0.0, 0.05), # 下界改为 0.0
-            num_waves=3,
-        ),
-        # 5. 平地保持不变
-        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
-        # 不规则地面地形（坑洼）
-        "random_uniform": terrain_gen.HfRandomUniformTerrainCfg(
+        # 1. 倒金字塔台阶——4种步宽 (28/30/32/34cm)，模仿下山/下坡地形
+        "pyramid_stairs_28": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
             proportion=0.1,
-            noise_range=(0.0, 0.06),   # 最大 8cm 凹凸
-            noise_step=0.02,
-        ),
-        # 不规则高低地形（台阶）
-        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
-            proportion=0.05,
-            grid_width=0.49,
-            grid_height_range=(0.0, 0.1),
-        ),
-
-        # 坡度地形
-        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.05,
-            slope_range=(0.15, 0.25),   # 约 8.6°‑14.3°
+            step_height_range=(0.0, 0.23),
+            step_width=0.28,
             platform_width=3.0,
+            border_width=1.0,
+            holes=False,
         ),
-        # "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-        #     proportion=0.15,
-        #     num_obstacles=10,
-        #     obstacle_height_mode="fixed",
-        #     obstacle_height_range=(1, 1.5),
-        #     obstacle_width_range=(0.3, 1.5),
-        #     platform_width=0.5,
-        # ),
-        # # === FDM 复杂障碍 ===
-        # # 柱子群：地面上随机散布盒子+圆柱体，中央留安全平台
-        # "pillar_cluster": MeshPillarTerrainCfg(
-        #     proportion=0.08,
-        #     box_objects=MeshPillarTerrainCfg.BoxCfg(
-        #         width=(0.4, 1.0),
-        #         length=(0.2, 0.5),
-        #         max_yx_angle=(0, 10),
-        #         height=(1.5, 2.0),
-        #         num_objects=(3, 5),
-        #     ),
-        #     cylinder_cfg=MeshPillarTerrainCfg.CylinderCfg(
-        #         radius=(0.3, 0.5),
-        #         max_yx_angle=(0, 5),
-        #         height=(1.5, 2.0),
-        #         num_objects=(3, 5),
-        #     ),
-        # ),
-        # # 十字障碍阵：4个盒子形成十字屏障，必须绕行
-        # "box_cross": SingleObjectTerrainCfg(
-        #     proportion=0.07,
-        #     object_type="box",
-        #     dim_range=[0.5, 1.0],
-        #     height_range=[1.5, 2.0],
-        #     position_pattern=cross_object_pattern,
-        # ),
-        # # 楼梯+坡道+墙组合：40%概率替换为墙
-        # "stairs_ramp_wall": StairsRampEvalTerrainCfg(
-        #     proportion=0.08,
-        #     modify_step_height=True,
-        #     step_height_range=(0.1, 0.3),
-        #     step_width=0.3,
-        #     platform_width=1.0,
-        #     center_platform_width=1.0,
-        #     width_randomization=1.5,
-        #     random_stairs_ramp_position_flipping=True,
-        #     random_wall_probability=0.2,
-        #     max_height=1.0,
-        # ),
-        # # 单个大物体（盒子/圆柱/墙）
-        # "single_box": SingleObjectTerrainCfg(
-        #     proportion=0.07,
-        #     object_type="box",
-        #     dim_range=[0.8, 1.5],
-        #     height_range=[1.5, 2.5],
-        # ),
-
+        "pyramid_stairs_30": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.0, 0.23),
+            step_width=0.30,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "pyramid_stairs_32": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.0, 0.23),
+            step_width=0.32,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "pyramid_stairs_34": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.0, 0.23),
+            step_width=0.34,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        # 2. 随机网格盒子——地面上随机散布高低不一的方块
+        "boxes": terrain_gen.MeshRandomGridTerrainCfg(
+            proportion=0.15,
+            grid_width=0.45,
+            grid_height_range=(0.0, 0.15),
+            platform_width=2.0,
+        ),
+        # 3. 不规则凹凸地面——随机噪声生成坑洼地面
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.15,
+            noise_range=(-0.02, 0.04),
+            noise_step=0.02,
+            border_width=0.25,
+        ),
+        # 4. 波浪地形——模拟起伏路面
+        "wave": terrain_gen.HfWaveTerrainCfg(
+            proportion=0.15,
+            amplitude_range=(0.0, 0.2),
+            num_waves=5.0,
+        ),
+        # 5. 高台/坑洞——下陷平台 (double_pit 双向坑)
+        "high_platform": terrain_gen.MeshPitTerrainCfg(
+            proportion=0.15,
+            pit_depth_range=(0.0, 0.3),
+            platform_width=2.0,
+            double_pit=True,
+        ),
     },
 )
 @configclass
@@ -337,7 +290,7 @@ class ObservationsCfg:
 
         # observation terms (order preserved)
         # 机身角速度（3）
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=1.0)
         # 重力向量（3）、
         projected_gravity = ObsTerm(func=mdp.projected_gravity)
         # 指令根节点线速度（3）
@@ -405,202 +358,145 @@ class ObservationsCfg:
 
 @configclass
 class RewardsCfg:
-    """Reward terms for the MDP."""
+    """Reward terms for the MDP (LeggedLab G1Rough-aligned)."""
 
     # ==========================================
-    # 1. 任务与存活 (Task & Survival)
+    # 1. Task & Survival
     # ==========================================
-    
-    # 鼓励机器人跟踪目标水平面内的线速度指令（X、Y方向）。
-    track_lin_vel_xy = RewTerm(
+
+    track_lin_vel_xy_exp = RewTerm(
         func=mdp.track_lin_vel_xy_yaw_frame_exp,
-        weight=1.0,
-        params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
+        weight=1.5,
+        params={"command_name": "base_velocity", "std": 0.5},
     )
-    
-    # 鼓励机器人跟踪目标偏航角速度指令（Z轴旋转）。
-    track_ang_vel_z = RewTerm(
-        func=mdp.track_ang_vel_z_exp, 
-        weight=0.5, 
-        params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+    track_ang_vel_z_exp = RewTerm(
+        func=mdp.track_ang_vel_z_world_exp,
+        weight=1.5,
+        params={"command_name": "base_velocity", "std": 0.5},
     )
-    
-    # 鼓励机器人保持存活状态，避免触发摔倒等终止条件。
-    alive = RewTerm(func=mdp.is_alive, weight=0.15)
-    
-    # 强烈惩罚机器人触发回合终止条件，促使其尽可能长时间运行。
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
 
+    # ==========================================
+    # 2. Base & Posture
+    # ==========================================
+
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.25)
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
+    body_orientation_l2 = RewTerm(
+        func=mdp.body_orientation_l2,
+        weight=-2.0,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=".*torso.*")},
+    )
+    undesired_contacts = RewTerm(
+        func=mdp.undesired_contacts,
+        weight=-1.0,
+        params={
+            "threshold": 1.0,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names="(?!.*ankle.*).*"),
+        },
+    )
+    fly = RewTerm(
+        func=mdp.fly,
+        weight=-1.0,
+        params={
+            "threshold": 1.0,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+        },
+    )
 
     # ==========================================
-    # 2. 基座与姿态 (Base & Posture)
+    # 3. Joints & Regularization
     # ==========================================
-    
-    # 惩罚基座倾斜，鼓励机器人躯干在水平面上保持直立。
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
 
-    # 惩罚基座在Z方向的线速度，防止机器人行走时上下剧烈跳动。
-    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    
-    # 惩罚基座绕X和Y轴的角速度，抑制不必要的俯仰与滚转晃动。
-    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    
-    # 惩罚手臂关节偏离中立位置，鼓励手臂保持默认姿态。
-    joint_deviation_arms = RewTerm(
+    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-2.0)
+    energy = RewTerm(func=mdp.energy, weight=-1e-3)
+    joint_deviation_hip = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.5,
+        weight=-0.15,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
                 joint_names=[
-                    ".*_shoulder_.*_joint",
-                    ".*_elbow_joint",
-                    ".*_wrist_.*",
+                    ".*_hip_yaw.*",
+                    ".*_hip_roll.*",
+                    ".*_shoulder_pitch.*",
+                    ".*_elbow.*",
                 ],
             )
         },
     )
-    
-    # 惩罚腰部关节偏离中立位置，保持躯干姿态稳定。
-    joint_deviation_waists = RewTerm(
+    joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.8,
+        weight=-0.2,
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
                 joint_names=[
                     "waist.*",
+                    ".*_shoulder_roll.*",
+                    ".*_shoulder_yaw.*",
+                    ".*_wrist.*",
                 ],
             )
         },
     )
-    
-    # 惩罚特定腿部关节（如髋关节）偏离中立位置，规范腿部运动轨迹。
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.2,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
+        weight=-0.02,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=[".*_hip_pitch.*", ".*_knee.*", ".*_ankle.*"],
+            )
+        },
     )
 
-    # 惩罚基座高度偏离目标设定值，控制机器人保持稳定的站立高度。
-    # base_height = RewTerm(
-    #     func=mdp.base_height_l2, 
-    #     weight=-2, 
-    #     params={"target_height": 0.78, "sensor_cfg": SceneEntityCfg("height_scanner")}
-    # )
-
-
     # ==========================================
-    # 3. 关节控制与平滑 (Joints & Regularization)
+    # 4. Feet & Gait
     # ==========================================
-    
-    # 惩罚过高的关节运动速度，防止动作过于剧烈。
-    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
-    
-    # 惩罚过大的关节加速度，抑制关节运动的突然抖动。
-    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    
-    # 惩罚相邻帧动作输出的变化率，促使网络输出平滑的控制信号。
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.02)
-    
-    # 惩罚关节速度与力矩乘积的绝对值之和，降低机器人的整体能量消耗。
-    energy = RewTerm(func=mdp.energy, weight=-2e-5)
 
-
-    # ==========================================
-    # 4. 足端与步态 (Feet & Gait)
-    # ==========================================
-    
-    # 鼓励摆动腿在空中有合理的离地时间，规范迈步动作。
     feet_air_time = RewTerm(
-        func=mdp.feet_air_time_biped,
-        weight=0.50,
+        func=mdp.feet_air_time_positive_biped,
+        weight=0.25,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
             "command_name": "base_velocity",
-            "threshold": 0.35,
-            "max_air_time": 0.8,
-        },
-    )
-
-    # 惩罚脚部撞击竖直障碍物或台阶边缘，防止行走时绊倒。
-    feet_stumble = RewTerm(
-        func=mdp.feet_stumble,
-        weight=-1.5,
-        params={
+            "threshold": 0.4,
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
-    
-    # 惩罚双脚距离过近，避免左右脚发生自碰撞。
-    feet_too_near = RewTerm(
-        func=mdp.feet_too_near,
-        weight=-1.0,
-        params={
-            "threshold": 0.18,
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-        },
-    )
-
-    # 在无速度指令的静止状态下，鼓励双脚同时接触地面以维持稳定站立。
-    feet_contact_without_cmd = RewTerm(
-        func=mdp.feet_contact_without_cmd,
-        weight=0.05,
+    feet_slide = RewTerm(
+        func=mdp.feet_slide,
+        weight=-0.25,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll.*"),
         },
     )
-
-    # 惩罚足端落地时产生过大的冲击力，促使机器人实现软着陆。
     feet_force = RewTerm(
-        func=mdp.feet_contact_force_penalty,
+        func=mdp.body_force,
         weight=-3e-3,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-            "threshold": 500.0,
-            "max_excess": 400.0,
+            "threshold": 500,
+            "max_reward": 400,
         },
     )
-  
-    # 惩罚支撑脚在接触地面时的水平移动，防止走动时打滑。
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.2,
+    feet_too_near = RewTerm(
+        func=mdp.feet_too_near_humanoid,
+        weight=-2.0,
         params={
+            "threshold": 0.2,
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
-
-    # 根据步态周期相位鼓励脚部按规律正确交替着地。
-    # gait = RewTerm(
-    #     func=mdp.feet_gait,
-    #     weight=0.5,
-    #     params={
-    #         "period": 0.8,
-    #         "offset": [0.0, 0.5],
-    #         "threshold": 0.55,
-    #         "command_name": "base_velocity",
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-    #     },
-    # )
-
-
-    # ==========================================
-    # 5. 安全与物理限制 (Safety & Limits)
-    # ==========================================
-    
-    # 惩罚关节位置超出设定的软限位区间，保护硬件机械结构不受损。
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
-
-    # 惩罚除脚踝以外的身体部位触地，避免膝盖或躯干等部位的意外碰撞。
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1,
+    feet_stumble = RewTerm(
+        func=mdp.feet_stumble,
+        weight=-2.0,
         params={
-            "threshold": 1,
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
         },
     )
 

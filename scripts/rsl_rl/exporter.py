@@ -86,6 +86,16 @@ class _TorchPolicyExporter(torch.nn.Module):
                 self.global_encoder.cpu()
                 self.query_projector.cpu()
         # --------------------------------------------------------
+        # ---------- Auto-detect perception-style terrain encoder (MLP: ActorCriticPerception) ----------
+        self.has_perception_encoder = (
+            hasattr(policy, "terrain_encoder") and policy.terrain_encoder is not None
+            and hasattr(policy, "actor_obs_dim_no_terrain")
+        )
+        if self.has_perception_encoder:
+            self.mlp_terrain_encoder = copy.deepcopy(policy.terrain_encoder)
+            self.perception_split_dim = policy.actor_obs_dim_no_terrain
+            self.mlp_terrain_encoder.cpu()
+        # -----------------------------------------------------------------------------------------------
 
         # copy policy parameters
         if hasattr(policy, "actor"):
@@ -117,6 +127,15 @@ class _TorchPolicyExporter(torch.nn.Module):
             self.normalizer = copy.deepcopy(normalizer)
         else:
             self.normalizer = torch.nn.Identity()
+
+    def _encode_perception_terrain(self, obs):
+        """Perception-style terrain encoding: split proprio/terrain, MLP encode, concat."""
+        if obs.dim() == 1:
+            obs = obs.unsqueeze(0)
+        proprio_obs = obs[:, :self.perception_split_dim]
+        terrain_obs = obs[:, self.perception_split_dim:]
+        terrain_features = self.mlp_terrain_encoder(terrain_obs)
+        return torch.cat([proprio_obs, terrain_features], dim=-1)
 
     def _encode_terrain(self, obs):
         """Terrain encoding path (used only when has_terrain_encoder=True)."""
@@ -166,7 +185,14 @@ class _TorchPolicyExporter(torch.nn.Module):
         # Final encoded feature
         return encoded_obs
 
+    def _apply_perception_encoding(self, x):
+        """Apply perception-style terrain encoding if available."""
+        if self.has_perception_encoder:
+            x = self._encode_perception_terrain(x)
+        return x
+
     def forward_lstm(self, x):
+        x = self._apply_perception_encoding(x)
         x = self.normalizer(x)
         x, (h, c) = self.rnn(x.unsqueeze(0), (self.hidden_state, self.cell_state))
         self.hidden_state[:] = h
@@ -175,6 +201,7 @@ class _TorchPolicyExporter(torch.nn.Module):
         return self.actor(x)
 
     def forward_gru(self, x):
+        x = self._apply_perception_encoding(x)
         x = self.normalizer(x)
         x, h = self.rnn(x.unsqueeze(0), self.hidden_state)
         self.hidden_state[:] = h
@@ -203,9 +230,19 @@ class _TorchPolicyExporter(torch.nn.Module):
         self.eval()
         if self.has_terrain_encoder:
             input_dim = self.actor_proprio_dim + (self.L * self.W * self.coord_dim)
+<<<<<<< HEAD
             example_input = torch.zeros(1, input_dim)
         else:
             example_input = torch.zeros(1, self.actor[0].in_features)
+=======
+        elif self.has_perception_encoder:
+            input_dim = self.perception_split_dim + 187
+        elif self.is_recurrent:
+            input_dim = self.rnn.input_size
+        else:
+            input_dim = self.actor[0].in_features
+        example_input = torch.zeros(1, input_dim)
+>>>>>>> 924836f (perception（对齐legged_lab rough版本）)
         traced_module = torch.jit.trace(self, example_input)
         traced_module.save(path)
 
@@ -248,6 +285,16 @@ class _OnnxPolicyExporter(torch.nn.Module):
                 self.global_encoder.cpu()
                 self.query_projector.cpu()
         # --------------------------------------------------------
+        # ---------- Auto-detect perception-style terrain encoder (MLP: ActorCriticPerception) ----------
+        self.has_perception_encoder = (
+            hasattr(policy, "terrain_encoder") and policy.terrain_encoder is not None
+            and hasattr(policy, "actor_obs_dim_no_terrain")
+        )
+        if self.has_perception_encoder:
+            self.mlp_terrain_encoder = copy.deepcopy(policy.terrain_encoder)
+            self.perception_split_dim = policy.actor_obs_dim_no_terrain
+            self.mlp_terrain_encoder.cpu()
+        # -----------------------------------------------------------------------------------------------
 
         # copy policy parameters
         if hasattr(policy, "actor"):
@@ -276,13 +323,30 @@ class _OnnxPolicyExporter(torch.nn.Module):
         else:
             self.normalizer = torch.nn.Identity()
 
+    def _encode_perception_terrain(self, obs):
+        """Perception-style terrain encoding: split proprio/terrain, MLP encode, concat."""
+        if obs.dim() == 1:
+            obs = obs.unsqueeze(0)
+        proprio_obs = obs[:, :self.perception_split_dim]
+        terrain_obs = obs[:, self.perception_split_dim:]
+        terrain_features = self.mlp_terrain_encoder(terrain_obs)
+        return torch.cat([proprio_obs, terrain_features], dim=-1)
+
+    def _apply_perception_encoding(self, x):
+        """Apply perception-style terrain encoding if available."""
+        if self.has_perception_encoder:
+            x = self._encode_perception_terrain(x)
+        return x
+
     def forward_lstm(self, x_in, h_in, c_in):
+        x_in = self._apply_perception_encoding(x_in)
         x_in = self.normalizer(x_in)
         x, (h, c) = self.rnn(x_in.unsqueeze(0), (h_in, c_in))
         x = x.squeeze(0)
         return self.actor(x), h, c
 
     def forward_gru(self, x_in, h_in):
+        x_in = self._apply_perception_encoding(x_in)
         x_in = self.normalizer(x_in)
         x, h = self.rnn(x_in.unsqueeze(0), h_in)
         x = x.squeeze(0)
@@ -334,8 +398,18 @@ class _OnnxPolicyExporter(torch.nn.Module):
     def export(self, path, filename):
         self.to("cpu")
         self.eval()
+        # Determine correct input dimension for the model
+        if self.has_terrain_encoder:
+            input_dim = self.actor_proprio_dim + (self.L * self.W * self.coord_dim)
+        elif self.has_perception_encoder:
+            input_dim = self.perception_split_dim + 187
+        elif self.is_recurrent:
+            input_dim = self.rnn.input_size
+        else:
+            input_dim = self.actor[0].in_features
+
         if self.is_recurrent:
-            obs = torch.zeros(1, self.rnn.input_size)
+            obs = torch.zeros(1, input_dim)
             h_in = torch.zeros(self.rnn.num_layers, 1, self.rnn.hidden_size)
 
             if self.rnn_type == "lstm":
@@ -366,13 +440,8 @@ class _OnnxPolicyExporter(torch.nn.Module):
             else:
                 raise NotImplementedError(f"Unsupported RNN type: {self.rnn_type}")
         else:
-            # Non-recurrent case: compute the correct input shape
-            if self.has_terrain_encoder:
-                # Total input dim = proprioceptive dim + map scan dim
-                input_dim = self.actor_proprio_dim + (self.L * self.W * self.coord_dim)
-                obs = torch.zeros(1, input_dim)
-            else:
-                obs = torch.zeros(1, self.actor[0].in_features)
+            # Non-recurrent case: use the precomputed input_dim
+            obs = torch.zeros(1, input_dim)
                 
             torch.onnx.export(
                 self,

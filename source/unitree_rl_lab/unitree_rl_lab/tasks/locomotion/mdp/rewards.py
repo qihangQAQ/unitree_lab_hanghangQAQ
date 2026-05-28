@@ -1268,3 +1268,31 @@ def cross_axis_leakage(
     reward = torch.where(is_ang_cmd, torch.exp(-base_lin_vel_xy / sigma), reward)
     reward = torch.where(is_standing, 1.0, reward)
     return reward
+
+
+def body_force(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 500,
+    max_reward: float = 400,
+) -> torch.Tensor:
+    """Penalize large vertical contact forces on specified bodies (e.g. feet)."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    reward = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2].norm(dim=-1)
+    reward[reward < threshold] = 0
+    reward[reward > threshold] -= threshold
+    reward = reward.clamp(min=0, max=max_reward)
+    return reward
+
+
+def feet_too_near_humanoid(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    threshold: float = 0.2,
+) -> torch.Tensor:
+    """Penalize feet that are too close to each other (biped-specific, expects exactly 2 feet)."""
+    assert len(asset_cfg.body_ids) == 2
+    asset: Articulation = env.scene[asset_cfg.name]
+    feet_pos = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+    distance = torch.norm(feet_pos[:, 0] - feet_pos[:, 1], dim=-1)
+    return (threshold - distance).clamp(min=0)

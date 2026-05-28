@@ -17,11 +17,13 @@ KEY_VEL = {
     "E":   {"cmd": "ang_vel_z",  "val": -2.0},  # 右转
 }
 SHIFT_SPEED_SCALE = 2.0   # 按住 Shift 时的速度倍率
+HEADING_HOLD_K = 2.0       # 航向保持增益（rad/s per rad error）
 # =====================================================================
 
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import math
 import os
 import select
 import sys
@@ -143,6 +145,14 @@ class KeyboardReader:
                 termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self._old_settings)
             except Exception:
                 pass
+
+
+def _get_yaw(quat):
+    """Extract yaw from quaternion (w, x, y, z)."""
+    return torch.atan2(
+        2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
+        1.0 - 2.0 * (quat[2] * quat[2] + quat[3] * quat[3]),
+    )
 
 
 def configure_for_keyboard(env_cfg):
@@ -319,6 +329,10 @@ def main():
     if version("rsl-rl-lib").startswith("2.3."):
         obs, _ = env.get_observations()
 
+    # initialize heading hold target from current robot yaw
+    root_quat = env.unwrapped.scene["robot"].data.root_quat_w[0]
+    yaw_target = _get_yaw(root_quat).item()
+
     timestep = 0
 
     try:
@@ -349,6 +363,20 @@ def main():
             command_term.vel_command_b[:, 0] = lin_vel_x
             command_term.vel_command_b[:, 1] = lin_vel_y
             command_term.vel_command_b[:, 2] = ang_vel_z
+
+            # --- heading hold: maintain yaw when moving linearly without rotation input ---
+            root_quat = env.unwrapped.scene["robot"].data.root_quat_w[0]
+            current_yaw = _get_yaw(root_quat).item()
+            has_rotation = abs(ang_vel_z) > 1e-6
+            has_linear = abs(lin_vel_x) > 1e-6 or abs(lin_vel_y) > 1e-6
+
+            if has_rotation:
+                yaw_target = current_yaw
+            elif has_linear:
+                yaw_error = (yaw_target - current_yaw + math.pi) % (2 * math.pi) - math.pi
+                command_term.vel_command_b[:, 2] = HEADING_HOLD_K * yaw_error
+            else:
+                yaw_target = current_yaw
 
             # --- policy inference + env step ---
             with torch.inference_mode():
