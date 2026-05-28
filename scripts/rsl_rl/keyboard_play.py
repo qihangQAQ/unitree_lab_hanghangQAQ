@@ -9,12 +9,12 @@ WASD keys control the robot's velocity command in real time.
 # =====================================================================
 KEY_VEL = {
     #  按键      指令类型       速度值    说明
-    "W":   {"cmd": "lin_vel_x",  "val":  1.0},  # 前进
+    "W":   {"cmd": "lin_vel_x",  "val":  0.7},  # 前进
     "S":   {"cmd": "lin_vel_x",  "val": -0.5},  # 后退
     "A":   {"cmd": "lin_vel_y",  "val":  0.3},  # 左移
     "D":   {"cmd": "lin_vel_y",  "val": -0.3},  # 右移
-    "Q":   {"cmd": "ang_vel_z",  "val":  0.5},  # 左转
-    "E":   {"cmd": "ang_vel_z",  "val": -0.5},  # 右转
+    "Q":   {"cmd": "ang_vel_z",  "val":  2.0},  # 左转
+    "E":   {"cmd": "ang_vel_z",  "val": -2.0},  # 右转
 }
 SHIFT_SPEED_SCALE = 2.0   # 按住 Shift 时的速度倍率
 # =====================================================================
@@ -75,7 +75,8 @@ import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+from exporter import export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils import get_checkpoint_path
 
 import unitree_rl_lab.tasks  # noqa: F401

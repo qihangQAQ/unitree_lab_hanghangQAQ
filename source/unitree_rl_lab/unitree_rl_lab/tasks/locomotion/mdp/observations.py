@@ -3,9 +3,12 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.sensors import RayCaster
+from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+    from isaaclab.envs import ManagerBasedEnv
 
 
 def gait_phase(env: ManagerBasedRLEnv, period: float) -> torch.Tensor:
@@ -86,8 +89,8 @@ def feet_contact_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> t
     return flattened
 
 def height_scan_hpc(
-    env: ManagerBasedEnv, 
-    sensor_cfg: SceneEntityCfg, 
+    env: ManagerBasedEnv,
+    sensor_cfg: SceneEntityCfg,
     offset: float = 0.78  # 默认值改为 G1 的合理站立高度
 ) -> torch.Tensor:
     """
@@ -95,7 +98,7 @@ def height_scan_hpc(
     """
     # 提取传感器
     sensor: RayCaster = env.scene.sensors[sensor_cfg.name]
-    
+
     # 1. 原始物理计算：地形相对高度 = 传感器Z - 击中点Z - 目标离地偏移量
     # 结果含义：0.0 代表完美平地，正数代表脚下有坑（击中点低），负数代表踩到台阶（击中点高）
     heights = sensor.data.pos_w[:, 2].unsqueeze(1) - sensor.data.ray_hits_w[..., 2] - offset
@@ -106,3 +109,61 @@ def height_scan_hpc(
     heights = torch.nan_to_num(heights, nan=0.0, posinf=10.0, neginf=-10.0)
 
     return heights
+
+
+def elevation_map(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg, noise: bool = False) -> torch.Tensor:
+    """获取高程图观测（xyz 三维坐标格式）。
+
+    用于 AME (Attention-Based Map Encoding) 方法。
+    将射线击中点转换为传感器局部坐标系的 xyz 坐标。
+
+    Args:
+        env: 环境实例
+        sensor_cfg: 传感器配置
+        noise: 是否添加噪声
+
+    Returns:
+        torch.Tensor: 高程图数据，形状为 (num_envs, L*W*3)
+    """
+    sensor: RayCaster = env.scene.sensors[sensor_cfg.name]
+    relative_pos_w = sensor.data.ray_hits_w - sensor.data.pos_w.unsqueeze(1)
+    sensor_quat = sensor.data.quat_w  # (N, 4)
+    N, B, _ = relative_pos_w.shape
+
+    # Handle different sensor alignments
+    alignment = getattr(sensor.cfg, "ray_alignment", "base")
+    if alignment == "yaw":
+        sensor_quat = yaw_quat(sensor_quat)
+
+    sensor_quat_expanded = (sensor_quat.unsqueeze(1).expand(N, B, 4).reshape(N*B, 4)).to(torch.float)
+    relative_pos_w_reshaped = relative_pos_w.reshape(N*B, 3)
+    sensor_coords = quat_apply_inverse(sensor_quat_expanded, relative_pos_w_reshaped)
+    sensor_coords = sensor_coords.reshape(N, B, 3)
+
+    if torch.isnan(sensor_coords).any() or torch.isinf(sensor_coords).any():
+        sensor_coords = torch.nan_to_num(sensor_coords)
+
+    if noise:
+        # Initialize buffers for shift and delayed observation
+        if getattr(env, "_elevation_map_offset", None) is None or env._elevation_map_offset.shape != (N, 1):
+            env._elevation_map_offset = torch.zeros((N, 1), device=env.device)
+
+        # Resample x and y shift for reset environments (-5cm to 5cm)
+        if hasattr(env, "reset_buf"):
+            reset_env_ids = env.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+            if len(reset_env_ids) > 0:
+                env._elevation_map_offset[reset_env_ids] = torch.rand((len(reset_env_ids), 1), device=env.device) * 0.1 - 0.05
+
+        # Add Gaussian noise to each height value (std=3cm)
+        height_noise = torch.randn_like(sensor_coords[..., 2]) * 0.03
+        sensor_coords[..., 2] += height_noise
+        # Add a global offset noise to simulate sensor initialization error
+        offset_noise = env._elevation_map_offset
+        sensor_coords[..., 2] += offset_noise
+
+    # Clip height values
+    sensor_coords[..., 2] = torch.clamp(sensor_coords[..., 2], min=-1.2, max=0.0)
+
+    current_map = sensor_coords.reshape(N, B * 3)
+
+    return current_map

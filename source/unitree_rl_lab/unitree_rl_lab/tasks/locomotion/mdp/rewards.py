@@ -244,6 +244,42 @@ Other rewards.
 """
 
 
+def joint_coordination_rel(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, coord_joints: list[list[str]], coord_signs: list[list[float]] = None) -> torch.Tensor:
+    """Reward coordinated motion between joint pairs using relative positions and signs.
+
+    Args:
+        coord_joints: List of joint pairs to coordinate.
+        coord_signs: Sign per joint in each pair, e.g. [[1.0, -1.0]].
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    if not hasattr(env, "joint_coord_joints_cache") or env.joint_coord_joints_cache is None:
+        env.joint_coord_joints_cache = [
+            [asset.find_joints(joint_name)[0] for joint_name in joint_pair] for joint_pair in coord_joints
+        ]
+
+    if coord_signs is None:
+        coord_signs = [[1.0, 1.0]] * len(coord_joints)
+
+    reward = torch.zeros(env.num_envs, device=env.device)
+
+    for i, joint_indices in enumerate(env.joint_coord_joints_cache):
+        joint1_idx = joint_indices[0][0]
+        joint2_idx = joint_indices[1][0]
+
+        joint1_rel = asset.data.joint_pos[:, joint1_idx] - asset.data.default_joint_pos[:, joint1_idx]
+        joint2_rel = asset.data.joint_pos[:, joint2_idx] - asset.data.default_joint_pos[:, joint2_idx]
+
+        joint1_signed = joint1_rel * coord_signs[i][0]
+        joint2_signed = joint2_rel * coord_signs[i][1]
+
+        coord_error = torch.square(joint1_signed - joint2_signed)
+        reward += coord_error
+
+    reward *= 1 / len(coord_joints) if len(coord_joints) > 0 else 0
+    return reward
+
+
 def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joints: list[list[str]]) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
