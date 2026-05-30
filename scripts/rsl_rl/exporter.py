@@ -230,11 +230,6 @@ class _TorchPolicyExporter(torch.nn.Module):
         self.eval()
         if self.has_terrain_encoder:
             input_dim = self.actor_proprio_dim + (self.L * self.W * self.coord_dim)
-<<<<<<< HEAD
-            example_input = torch.zeros(1, input_dim)
-        else:
-            example_input = torch.zeros(1, self.actor[0].in_features)
-=======
         elif self.has_perception_encoder:
             input_dim = self.perception_split_dim + 187
         elif self.is_recurrent:
@@ -242,7 +237,6 @@ class _TorchPolicyExporter(torch.nn.Module):
         else:
             input_dim = self.actor[0].in_features
         example_input = torch.zeros(1, input_dim)
->>>>>>> 924836f (perception（对齐legged_lab rough版本）)
         traced_module = torch.jit.trace(self, example_input)
         traced_module.save(path)
 
