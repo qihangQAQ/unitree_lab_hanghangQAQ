@@ -9,18 +9,16 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class RslRlPerceptionActorCriticCfg(RslRlPpoActorCriticCfg):
     """
-    Perception-enhanced Actor-Critic configuration.
+    Recurrent Actor-Critic configuration (aligned with LeggedLab G1Rough).
 
-    Extends PPO actor-critic configuration with:
-    - LSTM hidden size
-    - Terrain encoder dimensions
+    Uses standard ActorCriticRecurrent from rsl_rl with LSTM.
+    No terrain encoder — height scan goes directly to LSTM.
     """
-    # Network class name (must match the class name in code)
-    class_name: str = "ActorCriticPerception"
+    # Network class name (standard rsl_rl recurrent)
+    class_name: str = "ActorCriticRecurrent"
 
-    # New hyperparameters for perception network
+    # LSTM parameters
     lstm_hidden_size: int = 256
-    terrain_encoder_dims: list[int] = [128]
 
 
 @configclass
@@ -56,15 +54,14 @@ class UnitreePerceptionRunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 100
     empirical_normalization = False
 
-    # Policy configuration with terrain encoder + LSTM
+    # Policy configuration with LSTM (aligned with LeggedLab G1Rough)
     policy = RslRlPerceptionActorCriticCfg(
         init_noise_std=1.0,
-        actor_hidden_dims=[256, 128],
-        critic_hidden_dims=[256, 128],
+        actor_hidden_dims=[256, 256, 128],
+        critic_hidden_dims=[256, 256, 128],
         activation="elu",
-        noise_std_type="log",
+        noise_std_type="scalar",
         lstm_hidden_size=256,
-        terrain_encoder_dims=[256, 128],
     )
 
     # Algorithm configuration (same as PPO)

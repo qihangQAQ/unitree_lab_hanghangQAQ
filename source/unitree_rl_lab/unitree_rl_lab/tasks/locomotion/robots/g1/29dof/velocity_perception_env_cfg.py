@@ -124,7 +124,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",  # "plane", "generator"
         terrain_generator=ROUGH_TERRAINS_CFG,  # None, COBBLESTONE_ROAD_CFG
-        max_init_terrain_level=0,  # 初始从中间难度开始，ROUGH_TERRAINS_CFG有10个等级
+        max_init_terrain_level=5,  # 初始从中间难度开始，ROUGH_TERRAINS_CFG有10个等级
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -149,7 +149,7 @@ class RobotSceneCfg(InteractiveSceneCfg):
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
         pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=True,
+        debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
     contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
@@ -173,9 +173,9 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 1.0),
-            "dynamic_friction_range": (0.3, 1.0),
-            "restitution_range": (0.0, 0.0),
+            "static_friction_range": (0.6, 1.0),
+            "dynamic_friction_range": (0.4, 0.8),
+            "restitution_range": (0.0, 0.005),
             "num_buckets": 64,
         },
     )
@@ -184,35 +184,25 @@ class EventCfg:
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "mass_distribution_params": (-1.0, 3.0),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*torso.*"),
+            "mass_distribution_params": (-5.0, 5.0),
             "operation": "add",
         },
     )
 
     # reset
-    base_external_force_torque = EventTerm(
-        func=mdp.apply_external_force_torque,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "force_range": (0.0, 0.0),
-            "torque_range": (-0.0, 0.0),
-        },
-    )
-
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
             "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
             },
         },
     )
@@ -221,8 +211,8 @@ class EventCfg:
         func=mdp.reset_joints_by_scale,
         mode="reset",
         params={
-            "position_range": (1.0, 1.0),
-            "velocity_range": (-1.0, 1.0),
+            "position_range": (0.5, 1.5),
+            "velocity_range": (0.0, 0.0),
         },
     )
 
@@ -230,8 +220,8 @@ class EventCfg:
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
-        interval_range_s=(5.0, 5.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+        interval_range_s=(10.0, 15.0),
+        params={"velocity_range": {"x": (-1.0, 1.0), "y": (-1.0, 1.0)}},
     )
 
 
@@ -257,15 +247,15 @@ class CommandsCfg:
     base_velocity = mdp.UniformVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.0,
+        rel_standing_envs=0.2,
         rel_heading_envs=1.0,
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-1.0, 1.0),
-            lin_vel_y=(-1.0, 1.0),
-            ang_vel_z=(-1.0, 1.0),
+            lin_vel_x=(-0.6, 1.0),
+            lin_vel_y=(-0.5, 0.5),
+            ang_vel_z=(-1.57, 1.57),
             heading=(-math.pi, math.pi),
         ),
     )
@@ -298,7 +288,7 @@ class ObservationsCfg:
         # 关节位置（29）
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
         # 关节速度（29）
-        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
+        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=1.0)
         # 上一帧动作（29）
         last_action = ObsTerm(func=mdp.last_action)
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
@@ -308,11 +298,10 @@ class ObservationsCfg:
             func=mdp.height_scan_hpc,
             params={
                 "sensor_cfg": SceneEntityCfg("height_scanner"),
-                "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
+                "offset": 0.5,  # 与 LeggedLab 对齐
             },
             scale = 1.0,
-            clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
-            noise=Unoise(n_min=-0.05, n_max=0.05) # 根据 base_env_config.py 还原 0.1 的噪声
+            noise=Unoise(n_min=-0.05, n_max=0.05) # 与 LeggedLab noise_scale=0.1 对齐
         )
 
         def __post_init__(self):
@@ -328,12 +317,19 @@ class ObservationsCfg:
         """Observations for critic group."""
 
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=1.0)
         projected_gravity = ObsTerm(func=mdp.projected_gravity)
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
-        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
+        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel, scale=1.0)
         last_action = ObsTerm(func=mdp.last_action)
+        feet_contact = ObsTerm(
+            func=mdp.feet_contact,
+            params={
+                "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+                "threshold": 0.5,
+            },
+        )
         # gait_phase = ObsTerm(func=mdp.gait_phase, params={"period": 0.8})
 
         # 高度扫描（187）
@@ -341,11 +337,10 @@ class ObservationsCfg:
             func=mdp.height_scan_hpc,
             params={
                 "sensor_cfg": SceneEntityCfg("height_scanner"),
-                "offset": 0.78,  # 👈 核心修改：与目标躯干高度对齐，让平地归零
+                "offset": 0.5,  # 与 LeggedLab 对齐
             },
             scale = 1.0,
-            clip=(-1.0, 1.0),    # 既然平地归零了，台阶和坑的起伏很少超过 1 米
-            noise=Unoise(n_min=-0.05, n_max=0.05) # 根据 base_env_config.py 还原 0.1 的噪声
+            noise=Unoise(n_min=-0.05, n_max=0.05) # 与 LeggedLab noise_scale=0.1 对齐
         )
 
 
