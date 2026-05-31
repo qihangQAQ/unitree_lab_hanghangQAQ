@@ -8,17 +8,10 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 @configclass
 class RslRlObstacleActorCriticCfg(RslRlPpoActorCriticCfg):
-    """Actor-Critic config with height scan + LSTM for obstacle avoidance.
+    """Recurrent Actor-Critic configuration with LSTM (aligned with Perception)."""
 
-    Extends PPO actor-critic configuration with:
-    - LSTM hidden size
-    - Terrain encoder dimensions (disabled at runtime)
-    """
-
-    class_name: str = "ActorCriticPerception"
-
+    class_name: str = "ActorCriticRecurrent"
     lstm_hidden_size: int = 256
-    terrain_encoder_dims: list[int] = [128]
 
 
 # ==============================================================================
@@ -41,24 +34,15 @@ class UnitreeObstacleRunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 100
     empirical_normalization = False
 
-    # Policy configuration (MLP, no LSTM)
-    policy = RslRlPpoActorCriticCfg(
+    # Policy configuration with LSTM (aligned with Perception)
+    policy = RslRlObstacleActorCriticCfg(
         init_noise_std=1.0,
-        actor_hidden_dims=[256, 128],
-        critic_hidden_dims=[256, 128],
+        actor_hidden_dims=[256, 256, 128],
+        critic_hidden_dims=[256, 256, 128],
         activation="elu",
+        noise_std_type="scalar",
+        lstm_hidden_size=256,
     )
-
-    # LSTM 备选方案（解封下面 + 注释上面即可切换为 LSTM 网络）
-    # policy = RslRlObstacleActorCriticCfg(
-    #     init_noise_std=1.0,
-    #     actor_hidden_dims=[256, 128],
-    #     critic_hidden_dims=[256, 128],
-    #     activation="elu",
-    #     noise_std_type="log",
-    #     lstm_hidden_size=256,
-    #     terrain_encoder_dims=[128],
-    # )
 
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
