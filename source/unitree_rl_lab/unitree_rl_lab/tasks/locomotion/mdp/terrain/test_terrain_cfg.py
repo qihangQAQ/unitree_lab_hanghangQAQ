@@ -60,16 +60,53 @@ TEST_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             platform_width=3.0,
         ),
         # --------------------------------------------------
-        #  FDM 复杂障碍（暂时注释，需要时取消注释）
+        #  Obstacle 障碍地形
         # --------------------------------------------------
-        # "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
-        #     proportion=1.0,
-        #     num_obstacles=10,
-        #     obstacle_height_mode="fixed",
-        #     obstacle_height_range=(1, 1.5),
-        #     obstacle_width_range=(0.3, 1.5),
-        #     platform_width=0.5,
-        # ),
+        # 7. 高离散障碍柱
+        "high_obstacles": terrain_gen.HfDiscreteObstaclesTerrainCfg(
+            proportion=1.0,
+            num_obstacles=10,
+            obstacle_height_mode="fixed",
+            obstacle_height_range=(0.7, 1.5),
+            obstacle_width_range=(0.3, 1.5),
+            platform_width=0.5,
+        ),
+        # 8. 随机圆柱体（柱子/树干类障碍）
+        "repeated_cylinders": terrain_gen.MeshRepeatedCylindersTerrainCfg(
+            proportion=1.0,
+            platform_width=1.5,
+            abs_height_noise=(-0.3, 0.3),
+            object_params_start=terrain_gen.MeshRepeatedCylindersTerrainCfg.ObjectCfg(
+                num_objects=15, height=0.6, radius=0.12, max_yx_angle=0.0, degrees=True
+            ),
+            object_params_end=terrain_gen.MeshRepeatedCylindersTerrainCfg.ObjectCfg(
+                num_objects=25, height=1.2, radius=0.2, max_yx_angle=0.0, degrees=True
+            ),
+        ),
+        # 9. 随机方盒（箱子/集装箱类障碍）
+        "repeated_boxes": terrain_gen.MeshRepeatedBoxesTerrainCfg(
+            proportion=1.0,
+            platform_width=1.5,
+            abs_height_noise=(-0.3, 0.3),
+            object_params_start=terrain_gen.MeshRepeatedBoxesTerrainCfg.ObjectCfg(
+                num_objects=12, height=0.5, size=(0.3, 0.3), max_yx_angle=30.0, degrees=True
+            ),
+            object_params_end=terrain_gen.MeshRepeatedBoxesTerrainCfg.ObjectCfg(
+                num_objects=20, height=1.0, size=(0.5, 0.5), max_yx_angle=45.0, degrees=True
+            ),
+        ),
+        # 10. 随机锥体（碎石/路障锥类障碍）
+        "repeated_pyramids": terrain_gen.MeshRepeatedPyramidsTerrainCfg(
+            proportion=1.0,
+            platform_width=1.5,
+            abs_height_noise=(-0.3, 0.3),
+            object_params_start=terrain_gen.MeshRepeatedPyramidsTerrainCfg.ObjectCfg(
+                num_objects=15, height=0.4, radius=0.15, max_yx_angle=0.0, degrees=True
+            ),
+            object_params_end=terrain_gen.MeshRepeatedPyramidsTerrainCfg.ObjectCfg(
+                num_objects=25, height=0.8, radius=0.25, max_yx_angle=0.0, degrees=True
+            ),
+        ),
     },
 )
 
