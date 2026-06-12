@@ -100,6 +100,18 @@ gym.register(
     },
 )
 
+# VLN (Vision-Language Navigation) — RGB 相机 + VLM 高层规划
+gym.register(
+    id="Unitree-G1-29dof-Velocity-VLN",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.velocity_vln_env_cfg:RobotVlnEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_vln_env_cfg:RobotVlnPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BasePPORunnerCfg",
+    },
+)
+
 # AME (Attention-Based Map Encoding) 速度命令控制
 gym.register(
     id="Unitree-G1-29dof-AME",
