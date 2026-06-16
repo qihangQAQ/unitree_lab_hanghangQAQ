@@ -13,8 +13,8 @@ KEY_VEL = {
     "S":   {"cmd": "lin_vel_x",  "val": -0.5},  # 后退
     "A":   {"cmd": "lin_vel_y",  "val":  0.3},  # 左移
     "D":   {"cmd": "lin_vel_y",  "val": -0.3},  # 右移
-    "Q":   {"cmd": "ang_vel_z",  "val":  1.5},  # 左转
-    "E":   {"cmd": "ang_vel_z",  "val": -1.5},  # 右转
+    "Q":   {"cmd": "ang_vel_z",  "val":  2.0},  # 左转
+    "E":   {"cmd": "ang_vel_z",  "val": -2.0},  # 右转
 }
 SHIFT_SPEED_SCALE = 2.0   # 按住 Shift 时的速度倍率
 # =====================================================================

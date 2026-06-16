@@ -364,11 +364,11 @@ class RewardsCfg:
         params={"command_name": "base_velocity", "std": 0.5},
     )
     # 惩罚命令未要求的轴上产生运动泄漏（前进时不该转，旋转时不该漂）。
-    # cross_axis_leakage = RewTerm(
-    #     func=mdp.cross_axis_leakage,
-    #     weight=0.35,
-    #     params={"command_name": "base_velocity", "sigma": 0.15},
-    # )
+    cross_axis_leakage = RewTerm(
+        func=mdp.cross_axis_leakage,
+        weight=0.35,
+        params={"command_name": "base_velocity", "sigma": 0.15},
+    )
     # 强烈惩罚回合终止，促使机器人尽可能长时间存活。
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
 
@@ -452,21 +452,15 @@ class RewardsCfg:
         },
     )
     # 惩罚腿部关节（髋 pitch、膝、踝）偏离中立位置。
-    # joint_deviation_legs = RewTerm(
-    #     func=mdp.joint_deviation_l1,
-    #     weight=-0.02,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg(
-    #             "robot",
-    #             joint_names=[".*_hip_pitch.*", ".*_knee.*", ".*_ankle.*"],
-    #         )
-    #     },
-    # )
-
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-0.02,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=[".*_hip_pitch.*", ".*_knee.*", ".*_ankle.*"],
+            )
+        },
     )
 
     # ==========================================
