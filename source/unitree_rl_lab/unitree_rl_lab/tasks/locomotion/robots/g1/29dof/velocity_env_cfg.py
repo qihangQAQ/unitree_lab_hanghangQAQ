@@ -463,11 +463,11 @@ class RewardsCfg:
     #     },
     # )
 
-    joint_deviation_legs = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.02,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
-    )
+    # joint_deviation_legs = RewTerm(
+    #     func=mdp.joint_deviation_l1,
+    #     weight=-0.02,
+    #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
+    # )
 
     # ==========================================
     # 4. 足端与步态 (Feet & Gait)
