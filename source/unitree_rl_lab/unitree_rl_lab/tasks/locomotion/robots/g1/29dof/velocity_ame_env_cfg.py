@@ -26,13 +26,18 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
 from unitree_rl_lab.tasks.locomotion import mdp
-from unitree_rl_lab.tasks.locomotion.mdp.terrain.loco_hf_terrains import HfConcentricGapTerrainCfg
+from unitree_rl_lab.tasks.locomotion.mdp.terrain.loco_hf_terrains import (
+    HfAlternateColumnStakesTerrainCfg,
+    HfConcentricGapTerrainCfg,
+    HfDoubleColumnStakesTerrainCfg,
+    HfStonesBridgeTerrainCfg,
+)
 
 # ==============================================================================
 # Terrain Configuration
 # ==============================================================================
 
-FINETUNE = False
+FINETUNE = True
 
 ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
     size=(8.0, 8.0),
@@ -104,7 +109,7 @@ FINETUNE_ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.15,
+            proportion=0.1,
             step_height_range=(0.05, 0.25),
             step_width=0.3,
             platform_width=3.0,
@@ -112,42 +117,71 @@ FINETUNE_ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             holes=False,
         ),
         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.15,
+            proportion=0.1,
             step_height_range=(0.05, 0.25),
             step_width=0.3,
             platform_width=3.0,
             border_width=1.0,
             holes=False,
         ),
-        "boxes": terrain_gen.MeshRandomGridTerrainCfg(
-            proportion=0.1, grid_width=0.45, grid_height_range=(0.05, 0.25), platform_width=2.0
-        ),
-        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.1, noise_range=(0.02, 0.12), noise_step=0.02, downsampled_scale=0.1, border_width=0.25
-        ),
-        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.1, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25
-        ),
-        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.1, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25
-        ),
-        "hf_steppingstones": terrain_gen.HfSteppingStonesTerrainCfg(
-            proportion=0.15,
-            stone_height_max=0.08,
-            stone_width_range=(0.2, 0.5),
-            stone_distance_range=(0.05, 0.3),
-            platform_width=2.0,
+        "stakes1": HfDoubleColumnStakesTerrainCfg(
+            proportion=0.1,
+            stake_height_max=0.03,
+            stake_side_range=(0.20, 0.40),
+            stake_gap_range=(0.1, 0.3),
+            column_gap_range=(0.1, 0.1),
+            column_jitter=0.0,
             holes_depth=-2.0,
+            platform_width=2.0,
+            border_width=0.25,
+        ),
+        "stakes2": HfAlternateColumnStakesTerrainCfg(
+            proportion=0.2,
+            stake_height_max=0.03,
+            stake_side_range=(0.20, 0.40),
+            stake_gap_range=(0.05, 0.15),
+            column_gap_range=(0.0, 0.2),
+            column_jitter=0.0,
+            holes_depth=-2.0,
+            platform_width=2.0,
+            border_width=0.25,
+        ),
+        "stakes3": HfAlternateColumnStakesTerrainCfg(
+            proportion=0.2,
+            stake_height_max=0.03,
+            stake_side_range=(0.20, 0.40),
+            stake_gap_range=(0.05, 0.25),
+            column_gap_range=(0.3, 0.2),
+            column_jitter=0.0,
+            holes_depth=-2.0,
+            platform_width=2.0,
             border_width=0.25,
         ),
         "hf_gaps": HfConcentricGapTerrainCfg(
-            proportion=0.15,
-            gap_width_range=(0.1, 0.6),
+            proportion=0.1,
+            gap_width_range=(0.2, 0.6),
             platform_width=2.0,
             border_width=0.25,
             gap_depth=-2.0,
-            ground_width_range=(0.4, 0.5),
+            ground_width_range=(0.5, 0.5),
             ground_height_max=0.03,
+        ),
+        "stonebridge": HfStonesBridgeTerrainCfg(
+            proportion=0.1,
+            platform_width=2.0,
+            border_width=0.25,
+            holes_depth=-2.0,
+            stone_height_max=0.03,
+            stone_width_range=(0.25, 0.35),
+            stone_distance_range=(0.3, 0.5),
+            stone_length_range=(0.6, 1.0),
+            stone_lateral_distance_range=(0.0, 0.0),
+        ),
+        "rails": terrain_gen.MeshRailsTerrainCfg(
+            proportion=0.1,
+            rail_height_range=(0.25, 0.05),
+            rail_thickness_range=(0.1, 0.3),
+            platform_width=2.0,
         ),
     },
 )

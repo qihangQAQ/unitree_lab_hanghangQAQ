@@ -9,6 +9,12 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 @configclass
 class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
+    # ============== WandB Configuration ===========
+    logger = "wandb"
+    wandb_project = "Unitree_g1_Mimic"
+    run_name = "Mimic_Run"
+    # ==============================================
+
     num_steps_per_env = 24
     max_iterations = 30000
     save_interval = 500

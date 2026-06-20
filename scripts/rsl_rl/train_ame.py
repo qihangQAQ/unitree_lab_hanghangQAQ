@@ -126,13 +126,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )
 
-    # Enable finetune mode if requested
-    if args_cli.finetune:
-        print("[INFO] Enabling finetune mode (Stage 2 training)")
-        # Import the env cfg module to set FINETUNE flag
-        import unitree_rl_lab.tasks.locomotion.robots.g1.velocity_ame_env_cfg as ame_cfg_module
-        ame_cfg_module.FINETUNE = True
-
     # set the environment seed
     env_cfg.seed = agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
