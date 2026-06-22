@@ -60,6 +60,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
+import numpy as np
 import torch
 from importlib.metadata import version
 
@@ -73,6 +74,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
+from isaaclab.terrains import TerrainGenerator
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
@@ -80,8 +82,34 @@ from exporter import export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils import get_checkpoint_path
 
 import unitree_rl_lab.tasks  # noqa: F401
-from unitree_rl_lab.tasks.locomotion.mdp.terrain.test_terrain_cfg import TEST_TERRAINS_CFG
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
+
+
+KEYBOARD_TERRAIN_LEVELS = (2, 5, 7, 10)
+KEYBOARD_TERRAIN_TOTAL_LEVELS = 10
+
+
+class KeyboardPlayTerrainGenerator(TerrainGenerator):
+    """Terrain generator that keeps task terrains but samples selected 10-level difficulty rows."""
+
+    def _generate_curriculum_terrains(self):
+        proportions = np.array([sub_cfg.proportion for sub_cfg in self.cfg.sub_terrains.values()])
+        proportions /= np.sum(proportions)
+
+        sub_indices = []
+        for index in range(self.cfg.num_cols):
+            sub_index = np.min(np.where(index / self.cfg.num_cols + 0.001 < np.cumsum(proportions))[0])
+            sub_indices.append(sub_index)
+        sub_indices = np.array(sub_indices, dtype=np.int32)
+        sub_terrains_cfgs = list(self.cfg.sub_terrains.values())
+
+        lower, upper = self.cfg.difficulty_range
+        for sub_col in range(self.cfg.num_cols):
+            for sub_row, level in enumerate(KEYBOARD_TERRAIN_LEVELS):
+                difficulty = (level - 1 + self.np_rng.uniform()) / KEYBOARD_TERRAIN_TOTAL_LEVELS
+                difficulty = lower + (upper - lower) * difficulty
+                mesh, origin = self._get_terrain_mesh(difficulty, sub_terrains_cfgs[sub_indices[sub_col]])
+                self._add_sub_terrain(mesh, origin, sub_row, sub_col, sub_terrains_cfgs[sub_indices[sub_col]])
 
 
 class KeyboardReader:
@@ -148,7 +176,8 @@ class KeyboardReader:
 def configure_for_keyboard(env_cfg):
     """Modify env config for keyboard-controlled play.
 
-    - Single environment, test terrain from test_terrain_cfg.py
+    - Single environment, using the terrain generator from the selected task env cfg
+    - Keep only terrain levels 2, 5, 7, and 10 from the task's 10-level difficulty schedule
     - Disable terminations (keep only time_out)
     - Disable curriculum, domain randomization, and disturbances
     """
@@ -158,20 +187,29 @@ def configure_for_keyboard(env_cfg):
     # -- Single env
     env_cfg.scene.num_envs = 1
 
-    # -- Replace terrain with the test terrain config (all types, equal proportions)
-    n_types = len(TEST_TERRAINS_CFG.sub_terrains)
-    TEST_TERRAINS_CFG.num_rows = 2
-    TEST_TERRAINS_CFG.num_cols = n_types
-    TEST_TERRAINS_CFG.curriculum = False
-    TEST_TERRAINS_CFG.border_width = 25.0  # extra flat border for spawn area
-    env_cfg.scene.terrain.terrain_type = "generator"
-    env_cfg.scene.terrain.terrain_generator = TEST_TERRAINS_CFG
-    env_cfg.scene.terrain.max_init_terrain_level = 9
+    # -- Keep the task's terrain cfg, but generate a compact grid:
+    #    rows = selected difficulty levels, cols = one column per terrain type.
+    terrain_cfg = env_cfg.scene.terrain
+    terrain_gen_cfg = terrain_cfg.terrain_generator
+    if terrain_cfg.terrain_type == "generator" and terrain_gen_cfg is not None:
+        terrain_gen_cfg.class_type = KeyboardPlayTerrainGenerator
+        terrain_gen_cfg.curriculum = True
+        terrain_gen_cfg.num_rows = len(KEYBOARD_TERRAIN_LEVELS)
+        terrain_gen_cfg.num_cols = len(terrain_gen_cfg.sub_terrains)
+        terrain_gen_cfg.border_width = max(terrain_gen_cfg.border_width, 25.0)
+        for sub_cfg in terrain_gen_cfg.sub_terrains.values():
+            sub_cfg.proportion = 1.0
+        terrain_cfg.max_init_terrain_level = terrain_gen_cfg.num_rows - 1
+        print(
+            "[INFO] Keyboard terrain uses task cfg with difficulty levels "
+            f"{KEYBOARD_TERRAIN_LEVELS} / {KEYBOARD_TERRAIN_TOTAL_LEVELS}."
+        )
+    else:
+        print("[INFO] Keyboard terrain keeps non-generator terrain from task cfg.")
 
-    # Spawn robot in the flat border zone just outside the terrain grid.
-    # Grid: 2 rows × 8m = 16m tall, centered at origin → grid y ∈ [-8, 8]
-    # Placing robot at y = 10 puts it on the border (flat), 2m from nearest terrain.
-    SPAWN_Y = 10.0
+    # Terrain origins already point at each selected tile's spawn platform.
+    SPAWN_X = 0.0
+    SPAWN_Y = 0.0
 
     # -- Disable all terminations except time_out
     keep_attrs = {"time_out"}
@@ -193,7 +231,7 @@ def configure_for_keyboard(env_cfg):
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (0.0, 0.0), "y": (SPAWN_Y, SPAWN_Y), "yaw": (-1.57, -1.57)},
+            "pose_range": {"x": (SPAWN_X, SPAWN_X), "y": (SPAWN_Y, SPAWN_Y), "yaw": (-1.57, -1.57)},
             "velocity_range": {
                 "x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0),
                 "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0),
@@ -225,7 +263,7 @@ def main():
         device=args_cli.device,
         num_envs=args_cli.num_envs,
         use_fabric=not args_cli.disable_fabric,
-        entry_point_key="play_env_cfg_entry_point",
+        entry_point_key="env_cfg_entry_point",
     )
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
