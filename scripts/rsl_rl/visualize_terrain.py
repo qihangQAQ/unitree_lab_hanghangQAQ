@@ -34,6 +34,13 @@ parser.add_argument(
 )
 parser.add_argument("--cfg_module", type=str, default=TERRAIN_CFG_MODULE, help="Python module containing the terrain cfg.")
 parser.add_argument("--cfg_name", type=str, default=TERRAIN_CFG_NAME, help="TerrainGeneratorCfg variable name to visualize.")
+parser.add_argument(
+    "--random_layout",
+    action="store_true",
+    help="Show the terrain using random sampling from the cfg proportions instead of the organized curriculum grid.",
+)
+parser.add_argument("--num_rows", type=int, default=None, help="Override terrain generator rows for visualization.")
+parser.add_argument("--num_cols", type=int, default=None, help="Override terrain generator columns for visualization.")
 parser.add_argument("--debug_vis", action="store_true", help="Enable terrain debug visualization.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -82,8 +89,15 @@ def main():
     sim = SimulationContext(sim_cfg)
 
     terrain_cfg_to_use, stage_name, terrain_tile_names = _terrain_cfg_to_visualize()
-    terrain_cfg_to_use.curriculum = True
-    terrain_cfg_to_use.num_cols = len(terrain_tile_names)
+    if args_cli.random_layout:
+        terrain_cfg_to_use.curriculum = False
+    else:
+        terrain_cfg_to_use.curriculum = True
+        terrain_cfg_to_use.num_cols = len(terrain_tile_names)
+    if args_cli.num_rows is not None:
+        terrain_cfg_to_use.num_rows = args_cli.num_rows
+    if args_cli.num_cols is not None:
+        terrain_cfg_to_use.num_cols = args_cli.num_cols
 
     tile_size_x, tile_size_y = terrain_cfg_to_use.size
     total_length = terrain_cfg_to_use.num_rows * tile_size_x
@@ -125,7 +139,10 @@ def main():
 
     sim.reset()
     print(f"[INFO] Visualizing {stage_name} terrain.")
-    print("[INFO] Curriculum is set to TRUE for an organized terrain-type x difficulty grid.")
+    if args_cli.random_layout:
+        print("[INFO] Random layout is enabled; terrain tiles are sampled from cfg proportions.")
+    else:
+        print("[INFO] Curriculum is set to TRUE for an organized terrain-type x difficulty grid.")
     print(f"[INFO] Terrain types: {', '.join(terrain_tile_names)}")
     print("[INFO] Press Ctrl+C or close Isaac Sim to stop.")
 

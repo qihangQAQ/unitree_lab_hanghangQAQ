@@ -10,11 +10,15 @@ import isaaclab.terrains as terrain_gen
 
 from unitree_rl_lab.tasks.fdm.mdp.terrains import (
     MeshPillarTerrainCfg,
+    MeshQuadPyramidStairsCfg,
+    RandomMazeTerrainCfg,
+    RslStairsCfg,
     SingleObjectTerrainCfg,
     StairsRampEvalTerrainCfg,
     StairsRampTerrainCfg,
+    StairsRampUpDownTerrainCfg,
 )
-from unitree_rl_lab.tasks.fdm.mdp.terrains.single_object import cross_object_pattern
+from unitree_rl_lab.tasks.fdm.mdp.terrains.single_object import cross_object_pattern, extended_cross_object_pattern
 
 # ==============================================================================
 # Simple terrain — single obstacle per tile, good for initial pipeline testing
@@ -199,6 +203,231 @@ FDM_TRAIN_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
             all_wall=True,  # always a wall — tests pure non-traversable
             max_height=1.5,
         ),
+    },
+)
+
+# ==============================================================================
+# USD-like generated terrain — banded full-map layout for FDM data collection
+# ==============================================================================
+FDM_USD_LIKE_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
+    size=(12.0, 12.0),
+    border_width=1.0,
+    num_rows=10,
+    num_cols=18,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    curriculum=True,
+    difficulty_range=(0.35, 1.0),
+    border_height=2.5,
+    sub_terrains={
+        # Stairs, ramps, wall substitutions, and center-platform transitions.
+        "stairs_ramp_lane": StairsRampEvalTerrainCfg(
+            proportion=2.0,
+            modify_step_height=True,
+            step_height_range=(0.10, 0.32),
+            step_width=0.3,
+            platform_width=1.6,
+            center_platform_width=1.8,
+            border_width=0.25,
+            width_randomization=2.0,
+            random_stairs_ramp_position_flipping=True,
+            random_wall_probability=0.15,
+            max_height=1.0,
+        ),
+        "stairs_only_lane": StairsRampTerrainCfg(
+            proportion=1.0,
+            modify_step_height=True,
+            step_height_range=(0.12, 0.34),
+            step_width=0.3,
+            platform_width=1.6,
+            border_width=0.25,
+            width_randomization=2.0,
+            random_stairs_ramp_position_flipping=True,
+            random_wall_probability=0.0,
+            max_height=1.0,
+        ),
+        "ramp_only_lane": StairsRampTerrainCfg(
+            proportion=1.0,
+            modify_ramp_slope=True,
+            ramp_slope_range=(20, 45),
+            step_width=0.3,
+            platform_width=1.6,
+            border_width=0.25,
+            width_randomization=2.0,
+            random_stairs_ramp_position_flipping=True,
+            random_wall_probability=0.0,
+            max_height=1.0,
+        ),
+        "stairs_ramp_up_down": StairsRampUpDownTerrainCfg(
+            proportion=1.0,
+            modify_step_height=True,
+            step_height_range=(0.12, 0.28),
+            step_width=0.3,
+            platform_width=1.8,
+            center_platform_width=2.0,
+            border_width=0.25,
+            width_randomization=1.5,
+            random_stairs_ramp_position_flipping=True,
+            random_wall_probability=0.1,
+            max_height=1.0,
+        ),
+        "rsl_stairs_wall": RslStairsCfg(
+            proportion=1.0,
+            border_width=0.25,
+            num_steps=2,
+            step_height=0.18,
+            step_width=0.29,
+            box_length=1.5,
+            center_platform_width=2.5,
+            platform_width=2.5,
+            wall_probability=0.5,
+            wall_height=2.0,
+            wall_width=0.1,
+        ),
+        "quad_pyramid_stairs": MeshQuadPyramidStairsCfg(
+            proportion=1.0,
+            step_height_range=(0.06, 0.23),
+            step_width=0.3,
+            platform_width=3.0,
+            border_width=0.5,
+            holes=False,
+        ),
+        # Dense obstacle forest, similar to the pillar block in the official USD scene.
+        "pillar_forest": MeshPillarTerrainCfg(
+            proportion=3.0,
+            platform_width=2.2,
+            box_objects=MeshPillarTerrainCfg.BoxCfg(
+                width=(0.35, 0.9),
+                length=(0.2, 0.55),
+                max_yx_angle=(0, 10),
+                height=(1.6, 2.6),
+                num_objects=(8, 18),
+            ),
+            cylinder_cfg=MeshPillarTerrainCfg.CylinderCfg(
+                radius=(0.22, 0.45),
+                max_yx_angle=(0, 5),
+                height=(1.6, 2.8),
+                num_objects=(10, 22),
+            ),
+        ),
+        # Rough obstacle forest for 3D perception and contact-rich samples.
+        "rough_pillar_forest": MeshPillarTerrainCfg(
+            proportion=2.0,
+            platform_width=2.2,
+            box_objects=MeshPillarTerrainCfg.BoxCfg(
+                width=(0.35, 0.9),
+                length=(0.2, 0.55),
+                max_yx_angle=(0, 10),
+                height=(1.5, 2.5),
+                num_objects=(5, 12),
+            ),
+            cylinder_cfg=MeshPillarTerrainCfg.CylinderCfg(
+                radius=(0.22, 0.45),
+                max_yx_angle=(0, 5),
+                height=(1.5, 2.6),
+                num_objects=(6, 14),
+            ),
+            rough_terrain=terrain_gen.HfRandomUniformTerrainCfg(
+                noise_range=(0.02, 0.08),
+                noise_step=0.02,
+                border_width=0.25,
+            ),
+        ),
+        # Maze blocks: walls with small stair blocks sprinkled into the corridors.
+        "maze_with_stairs": RandomMazeTerrainCfg(
+            proportion=2.0,
+            border_width=0.25,
+            resolution=1.25,
+            maze_height=2.5,
+            step_height_range=(0.12, 0.25),
+            step_width_range=(0.25, 0.35),
+            num_stairs=5,
+        ),
+        # Regular and extended object barriers, echoing the object rows in the USD terrain.
+        "single_box": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="box",
+            dim_range=[0.7, 1.4],
+            height_range=[1.6, 2.4],
+        ),
+        "single_cylinder": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="cylinder",
+            dim_range=[0.3, 0.7],
+            height_range=[1.6, 2.4],
+        ),
+        "single_wall": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="wall",
+            dim_range=[1.5, 3.0],
+            height_range=[1.6, 2.5],
+            wall_width=0.15,
+        ),
+        "box_cross": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="box",
+            dim_range=[0.5, 1.1],
+            height_range=[1.6, 2.4],
+            position_pattern=cross_object_pattern,
+        ),
+        "cylinder_cross": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="cylinder",
+            dim_range=[0.25, 0.55],
+            height_range=[1.6, 2.4],
+            position_pattern=cross_object_pattern,
+        ),
+        "wall_cross": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="wall",
+            dim_range=[1.4, 3.0],
+            height_range=[1.6, 2.5],
+            wall_width=0.15,
+            position_pattern=cross_object_pattern,
+        ),
+        "box_extended_cross": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="box",
+            dim_range=[0.45, 0.95],
+            height_range=[1.6, 2.4],
+            position_pattern=extended_cross_object_pattern,
+        ),
+        "wall_extended_cross": SingleObjectTerrainCfg(
+            proportion=1.0,
+            object_type="wall",
+            dim_range=[1.2, 2.5],
+            height_range=[1.6, 2.5],
+            wall_width=0.15,
+            position_pattern=extended_cross_object_pattern,
+        ),
+        # Odd rough surfaces and low blocks from the evaluation/generated FDM terrain families.
+        "random_grid": terrain_gen.MeshRandomGridTerrainCfg(
+            proportion=1.0,
+            grid_width=0.7,
+            grid_height_range=(0.05, 0.25),
+            platform_width=2.0,
+            holes=False,
+        ),
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=1.0,
+            step_height_range=(0.05, 0.23),
+            step_width=0.3,
+            platform_width=3.0,
+        ),
+        "wave": terrain_gen.HfWaveTerrainCfg(
+            proportion=1.0,
+            amplitude_range=(0.0, 0.08),
+            num_waves=3,
+        ),
+        "rough_open_field": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=2.0,
+            noise_range=(5e-3, 6e-2),
+            noise_step=1e-2,
+            border_width=0.25,
+        ),
+        "flat_open_field": terrain_gen.MeshPlaneTerrainCfg(proportion=1.0),
     },
 )
 

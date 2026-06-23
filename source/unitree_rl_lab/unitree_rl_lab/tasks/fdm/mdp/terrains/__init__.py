@@ -15,6 +15,9 @@ from .pillar_terrain_cfg import (
     MeshPillarTerrainCfg,
     MeshPillarTerrainDeterministicCfg,
 )
+from .quad_pyramid_stairs_cfg import MeshQuadPyramidStairsCfg
+from .random_maze_cfg import RandomMazeTerrainCfg
+from .rsl_stairs_cfg import RslStairsCfg
 from .single_object import center_object_pattern, cross_object_pattern, extended_cross_object_pattern
 from .single_object_cfg import SingleObjectTerrainCfg
 from .stairs_ramp_terrain_cfg import StairsRampEvalTerrainCfg, StairsRampTerrainCfg, StairsRampUpDownTerrainCfg
