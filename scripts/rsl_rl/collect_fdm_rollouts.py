@@ -111,7 +111,7 @@ class SE2CommandSampler:
     """
 
     def __init__(self, num_envs: int, device: str,
-                 lin_vel_x_range: tuple = (-0.1, 1.5),
+                 lin_vel_x_range: tuple = (-0.1, 1.0),
                  lin_vel_y_range: tuple = (-0.4, 0.4),
                  ang_vel_z_range: tuple = (-1.0, 1.0),
                  linear_ratio: float = 0.6,
@@ -222,12 +222,83 @@ class FDMDataBuffer:
         self.fill_idx = torch.zeros(num_envs, dtype=torch.long)
         self.is_filled = torch.zeros(num_envs, dtype=torch.bool)
 
-        # Track steps since last history update per env
-        self._steps_since_history = torch.zeros(num_envs, dtype=torch.long)
-
     @property
     def fill_ratio(self) -> float:
         return (self.fill_idx.float().mean() / self.trajectory_length).item()
+
+    def fill_leftover_envs(self):
+        """Fill unfinished environments from already completed trajectories.
+
+        Mirrors the official FDM tail handling (replay_buffer.py:177-232):
+        finds the last collision point in each incomplete environment and fills
+        from there, preserving collision events. Environments that never collided
+        are filled from the beginning.
+        """
+        all_env_ids = torch.arange(self.num_envs)
+
+        # ---- Identify last collision index per environment ----
+        # collision is at state index 7 (base_collision in FdmStateCfg)
+        collision_indices = torch.nonzero(torch.any(self.states[..., 7], dim=-1))
+
+        if collision_indices.shape[0] == 0:
+            # No collisions at all — fall back to simple fill from start
+            collision_envs = all_env_ids.clone()
+            collision_max_indices = torch.zeros(self.num_envs, dtype=torch.long)
+        else:
+            collision_envs, unique_indices = torch.unique(collision_indices[:, 0], return_inverse=True)
+            env_split_data = torch.split(collision_indices[:, 1], torch.bincount(unique_indices).tolist())
+            collision_max_indices = torch.tensor(
+                [torch.max(env_indices) for env_indices in env_split_data], dtype=torch.long
+            )
+            # Note: add 1 to avoid cropping the collision event (ref: replay_buffer.py:188)
+            collision_max_indices += 1
+
+            # Handle envs that never collided — fill from the beginning
+            not_collided_envs = list(set(all_env_ids.tolist()) - set(collision_envs.tolist()))
+            if not_collided_envs:
+                collision_envs = torch.cat((collision_envs, torch.tensor(not_collided_envs)))
+                collision_max_indices = torch.cat(
+                    (collision_max_indices, torch.zeros(len(not_collided_envs), dtype=torch.long))
+                )
+
+        # Sort by environment id
+        collision_envs, sort_indices = collision_envs.sort()
+        collision_max_indices = collision_max_indices[sort_indices]
+
+        # Filter for environments that are not yet filled
+        unfilled_mask = ~self.is_filled[collision_envs]
+        envs_to_fill = collision_envs[unfilled_mask].long()
+        env_fill_from_indices = collision_max_indices[unfilled_mask].long()
+
+        if len(envs_to_fill) == 0:
+            return
+
+        # Find source environments with enough data to cover the fill gap
+        min_fill_from = torch.min(env_fill_from_indices)
+        source_candidates = all_env_ids[self.fill_idx >= self.trajectory_length - min_fill_from]
+        if len(source_candidates) == 0:
+            source_candidates = all_env_ids[self.is_filled]
+        if len(source_candidates) == 0:
+            print("[WARNING] Cannot fill leftover envs — no complete source env exists.")
+            return
+        if len(source_candidates) < len(envs_to_fill):
+            repeats = len(envs_to_fill) // len(source_candidates) + 1
+            source_candidates = source_candidates.repeat(repeats)[: len(envs_to_fill)]
+
+        # Fill each leftover environment from its last collision point onwards
+        for i, (target_env, fill_from) in enumerate(zip(envs_to_fill, env_fill_from_indices)):
+            source_env = source_candidates[i]
+            fill_from = int(fill_from.item())
+            if fill_from >= self.trajectory_length:
+                self.is_filled[target_env] = True
+                continue
+            remaining = self.trajectory_length - fill_from
+            self.actions[target_env, fill_from:] = self.actions[source_env, :remaining]
+            self.states[target_env, fill_from:] = self.states[source_env, :remaining]
+            self.proprioceptive[target_env, fill_from:] = self.proprioceptive[source_env, :remaining]
+            self.exteroceptive[target_env, fill_from:] = self.exteroceptive[source_env, :remaining]
+            self.fill_idx[target_env] = self.trajectory_length
+            self.is_filled[target_env] = True
 
     def reset_envs(self, env_ids: torch.Tensor):
         """Reset history buffers for done environments.
@@ -236,7 +307,6 @@ class FDMDataBuffer:
         """
         self._local_state_history[env_ids] = 0.0
         self._local_proprio_history[env_ids] = 0.0
-        self._steps_since_history[env_ids] = 0
 
     def update_history(self, env_ids: torch.Tensor, state: torch.Tensor, proprio: torch.Tensor):
         """Update history buffers for specified environments.
@@ -336,6 +406,37 @@ def _get_fdm_height_scan(base_env) -> torch.Tensor:
     return raw
 
 
+def _find_feet_body_ids(base_env, body_regex: str = ".*ankle_roll.*") -> torch.Tensor:
+    """Find foot body IDs used to gate FDM data collection after ground contact."""
+    contact_sensor = base_env.scene.sensors["contact_forces"]
+    body_ids, body_names = contact_sensor.find_bodies(body_regex)
+    if len(body_ids) == 0:
+        raise RuntimeError(f"No foot bodies matched regex '{body_regex}' in contact_forces sensor.")
+    print(f"[INFO] FDM feet-contact gating bodies: {body_names}")
+    return torch.tensor(body_ids, dtype=torch.long, device=base_env.device)
+
+
+def _update_feet_contact_seen(
+    base_env,
+    feet_body_ids: torch.Tensor,
+    feet_contact_seen: torch.Tensor,
+    dones: torch.Tensor | None = None,
+    threshold: float = 1.0,
+) -> torch.Tensor:
+    """Track whether each foot has touched the ground since the last reset.
+
+    This mirrors FDM's collection gate: history and trajectory samples only start
+    after all feet have made contact at least once after reset.
+    """
+    if dones is not None and torch.any(dones):
+        feet_contact_seen[dones] = False
+
+    contact_sensor = base_env.scene.sensors["contact_forces"]
+    contact_now = torch.norm(contact_sensor.data.net_forces_w[:, feet_body_ids], dim=-1) > threshold
+    feet_contact_seen[contact_now] = True
+    return torch.all(feet_contact_seen, dim=-1)
+
+
 def _inject_command(base_env, se2_cmd: torch.Tensor):
     """Inject SE(2) command into the command manager.
 
@@ -429,9 +530,12 @@ def main():
     # Calculate timing parameters
     step_dt = base_env.step_dt  # 0.005 * 4 = 0.02s
     steps_per_cmd = int(args_cli.command_timestep / step_dt)  # 0.5 / 0.02 = 25
-    history_interval = max(1, int(0.05 / step_dt))  # 0.05 / 0.02 ≈ 2-3 steps
+    history_collection_interval = steps_per_cmd / args_cli.history_length
 
-    print(f"[INFO] step_dt={step_dt:.4f}s, steps_per_cmd={steps_per_cmd}, history_interval={history_interval}")
+    print(
+        f"[INFO] step_dt={step_dt:.4f}s, steps_per_cmd={steps_per_cmd}, "
+        f"history_collection_interval={history_collection_interval}"
+    )
 
     # Get observation dimensions from environment
     # Test compute to get actual shapes
@@ -447,11 +551,11 @@ def main():
 
     # Select command range based on user choice
     if args_cli.use_fdm_range:
-        # FDM's original range (may cause OOD for perception policy)
-        lin_vel_x_range = (-0.1, 1.5)
+        # Gentler FDM-style range for the Unitree low-level policy.
+        lin_vel_x_range = (-0.1, 1.0)
         lin_vel_y_range = (-0.4, 0.4)
         ang_vel_z_range = (-1.0, 1.0)
-        print("[INFO] Using FDM command range: x(-0.1,1.5), y(-0.4,0.4), yaw(-1.0,1.0)")
+        print("[INFO] Using FDM command range: x(-0.1,1.0), y(-0.4,0.4), yaw(-1.0,1.0)")
     else:
         # Match velocity_perception training range (safer for policy)
         lin_vel_x_range = (-0.6, 1.0)
@@ -492,6 +596,9 @@ def main():
         "trajectory_length": args_cli.trajectory_length,
         "checkpoint": resume_path,
         "step_dt": step_dt,
+        "steps_per_cmd": steps_per_cmd,
+        "history_collection_interval": history_collection_interval,
+        "feet_contact_gated": True,
         "state_dim": state_dim,
         "proprio_dim": proprio_dim,
         "height_scan_shape": list(height_scan_shape),
@@ -512,8 +619,15 @@ def main():
     # Disable command manager's automatic resampling and standing/heading override
     _disable_command_autoupdate(base_env)
 
-    # All env IDs (CPU for indexing with CPU buffers)
-    all_env_ids_cpu = torch.arange(args_cli.num_envs)
+    # All env IDs on device; CPU copies are created only when writing CPU buffers.
+    all_env_ids_device = torch.arange(args_cli.num_envs, device=base_env.device)
+
+    # FDM-style collection gate: start counting/recording only after all feet touched the ground.
+    feet_body_ids = _find_feet_body_ids(base_env)
+    feet_contact_seen = torch.zeros(args_cli.num_envs, len(feet_body_ids), dtype=torch.bool, device=base_env.device)
+    feet_all_contact = torch.zeros(args_cli.num_envs, dtype=torch.bool, device=base_env.device)
+    env_step_counter = torch.zeros(args_cli.num_envs, dtype=torch.long, device=base_env.device)
+    last_record_step = torch.zeros(args_cli.num_envs, dtype=torch.long, device=base_env.device)
 
     # Sample initial SE(2) command and inject
     se2_cmd = se2_sampler.sample()
@@ -528,27 +642,16 @@ def main():
 
     with torch.inference_mode():
         while not data_buffer.is_filled.all():
-            # ---- Collect data BEFORE executing the command ----
-            # This ensures we store: (current_state, future_action_to_execute)
-
-            # Get active (non-filled) environments on CPU
-            active_mask_cpu = ~data_buffer.is_filled
-            active_env_ids_cpu = all_env_ids_cpu[active_mask_cpu]
-            if len(active_env_ids_cpu) == 0:
-                break
-
-            # Get current FDM observations (before executing se2_cmd)
-            state = _get_fdm_state(base_env)
-            proprio = _get_fdm_proprioceptive(base_env)
-            height_scan = _get_fdm_height_scan(base_env)
-
-            # Update history buffers with current state
-            data_buffer.update_history(active_env_ids_cpu, state.cpu(), proprio.cpu())
-
-            # Collect: current state + future action (se2_cmd)
-            data_buffer.add_trajectory_point(active_env_ids_cpu, se2_cmd.cpu(), height_scan.cpu())
-
-            cmd_step_counter += 1
+            # ---- FDM-style collection point ----
+            # Store current state + command to execute only after feet contact and a full command interval.
+            not_filled = ~data_buffer.is_filled.to(base_env.device)
+            record_mask = not_filled & feet_all_contact & ((env_step_counter - last_record_step) >= steps_per_cmd)
+            record_env_ids_device = all_env_ids_device[record_mask]
+            if len(record_env_ids_device) > 0:
+                height_scan = _get_fdm_height_scan(base_env)
+                record_env_ids_cpu = record_env_ids_device.cpu()
+                data_buffer.add_trajectory_point(record_env_ids_cpu, se2_cmd.cpu(), height_scan.cpu())
+                last_record_step[record_env_ids_device] = env_step_counter[record_env_ids_device]
 
             # ---- Now execute the command for steps_per_cmd steps ----
             for sub_step in range(steps_per_cmd):
@@ -566,6 +669,8 @@ def main():
                 if len(done_env_ids) > 0:
                     # Reset history buffers for done environments (CPU)
                     data_buffer.reset_envs(done_env_ids.cpu())
+                    env_step_counter[done_env_ids] = 0
+                    last_record_step[done_env_ids] = 0
 
                     # Reset LSTM hidden state for done environments
                     if is_recurrent:
@@ -578,29 +683,58 @@ def main():
                     # Update local se2_cmd to stay in sync
                     se2_cmd = se2_sampler.commands.clone()
 
+                feet_all_contact = _update_feet_contact_seen(base_env, feet_body_ids, feet_contact_seen, dones=dones)
+
+                # ---- Check collision for forced recording ----
+                # Mirror FDM's ReplayBuffer.add() logic (replay_buffer.py:134-143):
+                # when the base is in collision, force-update history and force-record
+                # a trajectory point immediately, even if not at a regular interval.
+                # Only applies when enough history has been accumulated (env_step_counter >= steps_per_cmd).
+                collision_state = _get_fdm_state(base_env)
+                colliding_now = collision_state[:, 7] > 0.5  # index 7 = base_collision in FdmStateCfg
+                colliding_valid = (
+                    (~data_buffer.is_filled.to(base_env.device))
+                    & feet_all_contact
+                    & colliding_now
+                    & (env_step_counter >= steps_per_cmd)
+                )
+
                 # ---- Update history buffers ----
-                # Only update after enough steps for history to be meaningful
-                # and at the specified interval
-                if sub_step % history_interval == 0:
-                    state = _get_fdm_state(base_env)
+                # Match FDM replay buffer semantics: update only after feet contact,
+                # and use the possibly fractional command_timestep/history_length interval.
+                # Also force-update for colliding environments (matching reference
+                # replay_buffer.py:322: updatable_envs[colliding_envs] = True).
+                history_due = (env_step_counter % history_collection_interval).to(torch.int) == 0
+                history_mask = (~data_buffer.is_filled.to(base_env.device)) & feet_all_contact & (history_due | colliding_valid)
+                history_env_ids_device = all_env_ids_device[history_mask]
+                if len(history_env_ids_device) > 0:
                     proprio = _get_fdm_proprioceptive(base_env)
-                    # Get active (non-filled) environments on CPU
-                    active_mask_cpu = ~data_buffer.is_filled
-                    active_env_ids_cpu = all_env_ids_cpu[active_mask_cpu]
-                    if len(active_env_ids_cpu) > 0:
-                        data_buffer.update_history(active_env_ids_cpu, state.cpu(), proprio.cpu())
+                    data_buffer.update_history(history_env_ids_device.cpu(), collision_state.cpu(), proprio.cpu())
+
+                # ---- Force-record trajectory point for colliding environments ----
+                # Matching reference replay_buffer.py:348-349:
+                # updatable_envs[colliding_envs] = True (force trajectory record on collision)
+                collision_record_ids = all_env_ids_device[colliding_valid]
+                if len(collision_record_ids) > 0:
+                    height_scan = _get_fdm_height_scan(base_env)
+                    data_buffer.add_trajectory_point(collision_record_ids.cpu(), se2_cmd.cpu(), height_scan.cpu())
+                    last_record_step[collision_record_ids] = env_step_counter[collision_record_ids]
+
+                env_step_counter[feet_all_contact] += 1
 
                 obs = next_obs
 
             # ---- Sample new SE(2) command for next iteration ----
             se2_cmd = se2_sampler.sample()
             _inject_command(base_env, se2_cmd)
+            cmd_step_counter += 1
 
             # Progress reporting
             if cmd_step_counter % 10 == 0:
                 print(f"[INFO] Sim steps: {total_sim_steps}, "
                       f"CMD steps: {cmd_step_counter}, "
-                      f"Fill ratio: {data_buffer.fill_ratio:.2%}")
+                      f"Fill ratio: {data_buffer.fill_ratio:.2%}, "
+                      f"Feet ready: {feet_all_contact.float().mean().item():.1%}")
 
     # ============================================================
     # Save data

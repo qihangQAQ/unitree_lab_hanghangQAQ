@@ -2,9 +2,14 @@
 # Register Gym environments.
 ##
 
-from isaaclab_tasks.utils import import_packages
+try:
+    from isaaclab_tasks.utils import import_packages
+except ModuleNotFoundError:
+    # Offline utilities such as FDM dataset training can run without IsaacLab.
+    import_packages = None
 
-# The blacklist is used to prevent importing configs from sub-packages
-_BLACKLIST_PKGS = ["virtual_obstacle"]
-# Import all configs in this package
-import_packages(__name__, _BLACKLIST_PKGS)
+if import_packages is not None:
+    # The blacklist is used to prevent importing configs from sub-packages
+    _BLACKLIST_PKGS = ["virtual_obstacle"]
+    # Import all configs in this package
+    import_packages(__name__, _BLACKLIST_PKGS)

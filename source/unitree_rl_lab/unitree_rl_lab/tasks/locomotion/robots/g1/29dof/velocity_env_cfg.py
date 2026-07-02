@@ -94,11 +94,11 @@ ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
         # ),
 
         # 坡度地形
-        "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.05,
-            slope_range=(0.15, 0.35),   # 约 8.6°‑14.3°
-            platform_width=3.0,
-        ),
+        # "pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+        #     proportion=0.05,
+        #     slope_range=(0.15, 0.35),   # 约 8.6°‑14.3°
+        #     platform_width=3.0,
+        # ),
         # "pit": terrain_gen.MeshPitTerrainCfg(
         #     proportion=0.05,
         #     pit_depth_range=(0.3, 0.5), # 坑深 30‑50cm

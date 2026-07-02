@@ -9,7 +9,7 @@ WASD keys control the robot's velocity command in real time.
 # =====================================================================
 KEY_VEL = {
     #  按键      指令类型       速度值    说明
-    "W":   {"cmd": "lin_vel_x",  "val":  1.0},  # 前进
+    "W":   {"cmd": "lin_vel_x",  "val":  0.5},  # 前进
     "S":   {"cmd": "lin_vel_x",  "val": -0.5},  # 后退
     "A":   {"cmd": "lin_vel_y",  "val":  0.5},  # 左移
     "D":   {"cmd": "lin_vel_y",  "val": -0.5},  # 右移

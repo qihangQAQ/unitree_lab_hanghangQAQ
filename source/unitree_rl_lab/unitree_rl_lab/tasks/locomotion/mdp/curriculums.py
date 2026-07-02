@@ -200,6 +200,273 @@ def hand_tracking_levels(
     return torch.tensor(ranges.velocity[1], device=env.device)
 
 
+def tracking_curriculum_levels(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    command_name: str = "hand_tracking",
+) -> torch.Tensor:
+    """Three-stage reward-gated sequential curriculum for the spray task.
+
+    Inspired by ULC (Unified Loco-Manipulation Controller):
+      Stage 1 "Locomotion":  base velocity + facing wall + fixed standing height.
+      Stage 2 "Height":      add trajectory-driven height tracking (squat/stand).
+      Stage 3 "Arm":         add arm tracking with progressive reward scaling.
+
+    Each stage gates on running-average reward thresholds.  When all gates pass
+    at an episode boundary the curriculum advances to the next stage.
+    """
+
+    # ------------------------------------------------------------------
+    # 1. 一次性初始化 (first call only)
+    # ------------------------------------------------------------------
+    if not hasattr(env, "tracking_curriculum_stage"):
+        env.tracking_curriculum_stage = 1           # 1-based: 1, 2, 3
+        env.tracking_curriculum_last_update = -1
+        env.tracking_curriculum_arm_scale = 0.0     # Stage-3 internal progress [0, 1]
+
+    stage = env.tracking_curriculum_stage
+    cmd_term = env.command_manager.get_term(command_name)
+
+    # ------------------------------------------------------------------
+    # 2. 每步都执行的参数应用 (确保 resume / checkpoint 安全)
+    # ------------------------------------------------------------------
+    if stage == 1:
+        _apply_stage_1(env, cmd_term)
+    elif stage == 2:
+        _apply_stage_2(env, cmd_term)
+    else:  # stage >= 3
+        _apply_stage_3(env, cmd_term)
+
+    # ------------------------------------------------------------------
+    # 3. Episode 结束时检查 gate，决定是否升级
+    # ------------------------------------------------------------------
+    if (env.common_step_counter % env.max_episode_length == 0
+            and env.common_step_counter != env.tracking_curriculum_last_update):
+        env.tracking_curriculum_last_update = env.common_step_counter
+
+        if stage == 1:
+            if _check_gates(env, env_ids, {
+                "track_base_vel": 0.60,
+                "base_face_surface_normal": 0.60,
+                "track_body_height": 0.70,
+            }):
+                env.tracking_curriculum_stage = 2
+                # 移除固定高度，改为轨迹驱动
+                if hasattr(cmd_term, 'curriculum_fixed_height'):
+                    del cmd_term.curriculum_fixed_height
+                print(f"[Curriculum] Stage 1 → 2 (Height tracking unlocked) "
+                      f"at step {env.common_step_counter}")
+
+        elif stage == 2:
+            if _check_gates(env, env_ids, {
+                "track_body_height": 0.65,
+                "track_base_vel": 0.55,
+                "base_face_surface_normal": 0.55,
+            }):
+                env.tracking_curriculum_stage = 3
+                env.tracking_curriculum_arm_scale = 0.0
+                print(f"[Curriculum] Stage 2 → 3 (Arm tracking unlocked) "
+                      f"at step {env.common_step_counter}")
+
+        elif stage == 3:
+            # Stage 3 内部渐进：手臂 reward scale 从 0 → 1
+            if env.tracking_curriculum_arm_scale < 1.0:
+                if _check_gates(env, env_ids, {
+                    "ee_pos_tracking_soft": 0.40,
+                    "track_base_vel": 0.45,
+                }):
+                    env.tracking_curriculum_arm_scale = min(
+                        1.0, env.tracking_curriculum_arm_scale + 0.1
+                    )
+                    print(f"[Curriculum] Stage 3 arm_scale → "
+                          f"{env.tracking_curriculum_arm_scale:.1f} "
+                          f"at step {env.common_step_counter}")
+
+    return torch.tensor(float(stage), device=env.device)
+
+
+# =========================================================================
+# 辅助函数
+# =========================================================================
+
+def _set_weight(env: ManagerBasedRLEnv, name: str, weight: float):
+    """Safe reward-weight setter (silently skip missing terms)."""
+    try:
+        env.reward_manager.get_term_cfg(name).weight = weight
+    except KeyError:
+        pass
+
+
+def _check_gates(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    gates: dict[str, float],
+) -> bool:
+    """Return True when ALL gate rewards exceed their thresholds.
+
+    Each gate value is a *threshold* on the **normalised** running-average
+    reward (mean_episode_reward / |weight|).  A reward with weight=0 is
+    treated as not-yet-active → gate fails.
+    """
+    for reward_name, threshold in gates.items():
+        if reward_name not in env.reward_manager._episode_sums:
+            print(f"  [Curriculum gate] {reward_name}=missing")
+            return False
+        reward_cfg = env.reward_manager.get_term_cfg(reward_name)
+        abs_weight = abs(float(reward_cfg.weight))
+        if abs_weight < 1e-9:
+            print(f"  [Curriculum gate] {reward_name}=weight_zero")
+            return False
+        mean_reward = (
+            torch.mean(env.reward_manager._episode_sums[reward_name][env_ids])
+            / env.max_episode_length_s
+        )
+        normalized = mean_reward / abs_weight
+        if normalized.item() < threshold:
+            print(f"  [Curriculum gate] {reward_name}={normalized.item():.3f} "
+                  f"(need {threshold:.2f})")
+            return False
+    return True
+
+
+# ------------------------------------------------------------------
+# Stage apply helpers
+# ------------------------------------------------------------------
+
+def _apply_stage_1(env: ManagerBasedRLEnv, cmd_term):
+    """Stage 1: 纯侧向行走 — 面向墙壁、保持站立高度、手臂锁默认姿态."""
+
+    # --- 命令参数：高度固定为站立高度 ---
+    cmd_term.curriculum_fixed_height = 0.78
+
+    # --- 底盘移动 (主导) ---
+    _set_weight(env, "track_base_vel",             2.0)
+    _set_weight(env, "base_face_surface_normal",   2.0)
+    _set_weight(env, "track_body_height",          1.5)
+    _set_weight(env, "com_support",                1.0)
+
+    # --- 手臂：强力锁默认姿态 ---
+    _set_weight(env, "joint_deviation_arms",      -2.0)
+    _set_weight(env, "joint_deviation_waists",    -1.0)
+    _set_weight(env, "joint_deviation_legs",      -0.5)
+
+    # --- 手臂任务 reward (全部关闭) ---
+    _set_weight(env, "ee_pos_tracking_soft",       0.0)
+    _set_weight(env, "ee_pos_tracking_tight",      0.0)
+    _set_weight(env, "ee_rot_tracking",            0.0)
+    _set_weight(env, "ee_tangential_speed_tracking", 0.0)
+    _set_weight(env, "action_smoothness",          0.0)
+
+    # --- 安全 & 正则化 (保持不变) ---
+    _set_weight(env, "feet_stumble",              -1.0)
+    _set_weight(env, "feet_too_near",             -1.0)
+    _set_weight(env, "feet_slide",               -1.0)
+    _set_weight(env, "feet_air_time_variance",   -1.0)
+    _set_weight(env, "alive",                      0.15)
+    _set_weight(env, "base_linear_velocity",      -0.5)
+    _set_weight(env, "base_angular_velocity",     -0.05)
+    _set_weight(env, "joint_vel",                 -0.001)
+    _set_weight(env, "joint_acc",                 -2.5e-7)
+    _set_weight(env, "action_rate",               -0.05)
+    _set_weight(env, "dof_pos_limits",            -5.0)
+    _set_weight(env, "energy",                    -2e-5)
+    _set_weight(env, "flat_orientation_l2",       -3.0)
+    _set_weight(env, "undesired_contacts",        -1.0)
+
+
+def _apply_stage_2(env: ManagerBasedRLEnv, cmd_term):
+    """Stage 2: 高度适应 — 轨迹驱动高度、腰/腿协调下蹲站立."""
+
+    # --- 命令参数：移除固定高度，使用轨迹反推 ---
+    if hasattr(cmd_term, 'curriculum_fixed_height'):
+        del cmd_term.curriculum_fixed_height
+
+    # --- 底盘移动 ---
+    _set_weight(env, "track_base_vel",             2.0)
+    _set_weight(env, "base_face_surface_normal",   2.0)
+    _set_weight(env, "track_body_height",          2.0)  # ← 提高权重
+    _set_weight(env, "com_support",                1.0)
+
+    # --- 手臂：仍然锁定 ---
+    _set_weight(env, "joint_deviation_arms",      -2.0)
+    # 腰部放松一点，允许为高度变化做俯仰
+    _set_weight(env, "joint_deviation_waists",    -0.5)  # ← 放松
+    # 腿部加强惩罚 (避免乱蹲，用腰来调高度)
+    _set_weight(env, "joint_deviation_legs",      -1.5)  # ← 加强
+
+    # --- 手臂任务 (仍关闭) ---
+    _set_weight(env, "ee_pos_tracking_soft",       0.0)
+    _set_weight(env, "ee_pos_tracking_tight",      0.0)
+    _set_weight(env, "ee_rot_tracking",            0.0)
+    _set_weight(env, "ee_tangential_speed_tracking", 0.0)
+    _set_weight(env, "action_smoothness",          0.0)
+
+    # --- 安全 & 正则化 ---
+    _set_weight(env, "feet_stumble",              -1.0)
+    _set_weight(env, "feet_too_near",             -1.0)
+    _set_weight(env, "feet_slide",               -1.0)
+    _set_weight(env, "feet_air_time_variance",   -1.0)
+    _set_weight(env, "alive",                      0.15)
+    _set_weight(env, "base_linear_velocity",      -0.5)
+    _set_weight(env, "base_angular_velocity",     -0.05)
+    _set_weight(env, "joint_vel",                 -0.001)
+    _set_weight(env, "joint_acc",                 -2.5e-7)
+    _set_weight(env, "action_rate",               -0.05)
+    _set_weight(env, "dof_pos_limits",            -5.0)
+    _set_weight(env, "energy",                    -2e-5)
+    _set_weight(env, "flat_orientation_l2",       -3.0)
+    _set_weight(env, "undesired_contacts",        -1.0)
+
+
+def _apply_stage_3(env: ManagerBasedRLEnv, cmd_term):
+    """Stage 3: 手臂喷涂 — 全部能力解锁，手臂 reward 渐进放大."""
+
+    # --- 命令参数：轨迹驱动高度 ---
+    if hasattr(cmd_term, 'curriculum_fixed_height'):
+        del cmd_term.curriculum_fixed_height
+
+    # 手臂渐进因子 [0, 1]
+    arm_s = getattr(env, 'tracking_curriculum_arm_scale', 0.0)
+
+    # --- 底盘移动 (逐步降权，让位给手臂) ---
+    # arm_s=0 → w=2.0;  arm_s=1 → w=1.0
+    w_base = 2.0 - arm_s * 1.0
+    _set_weight(env, "track_base_vel",             w_base)
+    _set_weight(env, "base_face_surface_normal",   w_base)
+    _set_weight(env, "track_body_height",          2.0)
+    _set_weight(env, "com_support",                1.0)
+
+    # --- 手臂任务 (渐进打开) ---
+    _set_weight(env, "ee_pos_tracking_soft",       0.5 + arm_s * 1.5)   # 0.5 → 2.0
+    _set_weight(env, "ee_pos_tracking_tight",      0.0 + arm_s * 1.5)   # 0.0 → 1.5
+    _set_weight(env, "ee_rot_tracking",            0.5 + arm_s * 1.5)   # 0.5 → 2.0
+    _set_weight(env, "ee_tangential_speed_tracking", 0.0 + arm_s * 1.0) # 0.0 → 1.0
+    _set_weight(env, "action_smoothness",         -0.005 - arm_s * 0.005) # -0.005 → -0.01
+
+    # --- 手臂姿态惩罚：右臂解放，左臂保持 ---
+    # arm_s=0 → -2.0;  arm_s=1 → -0.2 (只剩左臂的轻微约束)
+    w_arm_dev = -2.0 + arm_s * 1.8
+    _set_weight(env, "joint_deviation_arms",       w_arm_dev)
+    _set_weight(env, "joint_deviation_waists",    -0.5)
+    _set_weight(env, "joint_deviation_legs",      -1.5)
+
+    # --- 安全 & 正则化 ---
+    _set_weight(env, "feet_stumble",              -1.0)
+    _set_weight(env, "feet_too_near",             -1.0)
+    _set_weight(env, "feet_slide",               -1.0)
+    _set_weight(env, "feet_air_time_variance",   -1.0)
+    _set_weight(env, "alive",                      0.15)
+    _set_weight(env, "base_linear_velocity",      -0.5)
+    _set_weight(env, "base_angular_velocity",     -0.05)
+    _set_weight(env, "joint_vel",                 -0.001)
+    _set_weight(env, "joint_acc",                 -2.5e-7)
+    _set_weight(env, "action_rate",               -0.05)
+    _set_weight(env, "dof_pos_limits",            -5.0)
+    _set_weight(env, "energy",                    -2e-5)
+    _set_weight(env, "flat_orientation_l2",       -3.0)
+    _set_weight(env, "undesired_contacts",        -1.0)
+
+
 # ----------------  根据底盘追踪奖励的表现来放开手臂奖励的比例，而不是单纯调整命令范围。 ----------------
 def arm_tracking_reward_curriculum(
         env,

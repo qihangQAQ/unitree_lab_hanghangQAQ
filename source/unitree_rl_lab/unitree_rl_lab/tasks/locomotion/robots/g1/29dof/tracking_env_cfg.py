@@ -160,48 +160,49 @@ class CommandsCfg:
     hand_tracking = mdp.HandTrackingCommandCfg(
         # 基础连杆与刷新设置
         asset_name="robot",
-        ee_link_idx=29,                        # 【注意】请确保 29 是你 G1 机器人右腕/末端真实的 link index
-        resampling_time_range=(1.0e9, 1.0e9),  # 【关键补丁】：设为极大值，确保命令永不中途超时刷新
-        
+        ee_link_idx=29,                        # G1 右腕末端 link index
+        resampling_time_range=(1.0e9, 1.0e9),  # 命令永不中途超时刷新
+
         # 物理与控制周期
-        step_dt=0.02,                          # 环境的物理控制周期，0.02 表示 50Hz 控制频率
-        gun_length=0.15,                       # 喷枪的物理长度 (米)
-        point_spacing=0.01,                    # 轨迹点的离散采样间距。0.01 表示每隔 1cm 存一个坐标点
-        
-        # 观测空间(Observations)前瞻点设置
-        num_lookahead_points=4,                # 观测空间中的前瞻点数量
-        lookahead_spacing=0.05,                # 前瞻点之间的弧长间隔。0.05 表示未来 0cm(当前), 5cm, 10cm, 15cm 处的四个目标
-        
+        step_dt=0.02,                          # 50Hz 控制频率
+        gun_length=0.15,                       # 喷枪物理长度 (米) — 固定值
+        point_spacing=0.01,                    # 轨迹点离散采样间距 1cm
+
+        # 观测空间前瞻点
+        num_lookahead_points=4,                # 4 个前瞻点
+        lookahead_spacing=0.05,                # 间距 5cm: 0/5/10/15cm 处
+
         # ==========================
-        # 拼接复合轨迹专有配置
+        # 拼接复合轨迹配置 (固定参数，不做课程)
         # ==========================
-        num_chunks=5,                                 # 每条路径被分成的形态段数 (直线/波浪/圆环/方波)
-        amplitude_range=(0.15, 0.40),                 # 波浪/圆环的振幅范围
-        frequency_range=(8.0, 15.0),                  # 形状的频率范围
-        x_noise_scale=0.0012,                         # 墙面不平整度 (X 轴随机游走噪声)
-        normal_noise_scale=0.00,                      # 墙面法向不平整度。0.02 意味着法向量（决定喷枪姿态）会有轻微的扭曲摇摆
-        
-        # 起点与工作空间控制
-        start_x_forward=0.50,                         # 起点控制：第一点固定在机器人 root 坐标系正前方 50cm 处
-        start_y_offset_range=(-0.1, 0.1),             # 起点在左右 (Y 轴) 方向上的随机偏移范围，增加初始位置的多样性 (-10cm 到 10cm)
-        start_z_offset_range=(0.2, 0.4),              # 起点高度相对于机器人 root 高度的偏移范围 (往上偏 20cm 到 40cm，大概是胸前位置)
-        workspace_z=(0.60, 1.40),                     # 绝对安全工作空间 (Z 轴高度)。生成的轨迹在任何情况下都会被强制截断在这个高度范围内
-        
+        num_chunks=5,                                 # 5 段拼接
+        max_path_type=3,                              # 0=line, 1=+sine, 2=+circle, 3=+square
+        amplitude_range=(0.05, 0.20),                 # 振幅范围
+        frequency_range=(3.0, 10.0),                  # 频率范围
+        x_noise_scale=0.0012,                         # 墙面 X 轴不平整度
+        normal_noise_scale=0.02,                      # 墙面法向不平整度
+
+        # 起点与工作空间
+        start_x_forward=0.50,
+        start_y_offset_range=(-0.1, 0.1),
+        start_z_offset_range=(0.2, 0.4),
+        workspace_z=(0.60, 1.40),
+
         # 调试可视化
-        debug_vis=False,                              # 【注意】训练时强烈建议设为 False 以节省算力，Play 测试时可改为 True
-        
+        debug_vis=False,
+
         # ==========================
-        # 难度课程范围设置 (Curriculum)
+        # 喷涂参数 (固定值，不做域随机化)
         # ==========================
         ranges=mdp.HandTrackingCommandCfg.Ranges(
-            velocity=(0.10, 0.10),                    # 期望的喷涂移动速度 (10cm/s)，起步阶段固定速度，方便机器人学习稳定步伐
-            spray_distance=(0.05, 0.10),              # 喷枪头距离墙面的期望空隙距离 (5cm 到 10cm 随机)
-            path_length=(1.0, 3.0),                   # 整条轨迹的长度范围 (1m 到 3m)。前期走得短，更容易拿高分，建立信心
+            velocity=(0.15, 0.15),                    # 固定 0.15 m/s
+            spray_distance=(0.08, 0.08),              # 固定 8cm 喷涂距离
+            path_length=(5.0, 8.0),                   # 固定 5-8m 长路径
         ),
         limit_ranges=mdp.HandTrackingCommandCfg.LimitRanges(
-            velocity=(0.10, 0.30),                    # 随着课程解锁，最终机器人要能处理高达 30cm/s 的高速喷涂任务
-            spray_distance=(0.05, 0.15),              # 喷涂距离允许在 5cm 到 15cm 之间随机变化
-            path_length=(5.0, 8.0),                   # 最终机器人需要能一口气走完 5m 到 8m 长的超长复合墙面
+            velocity=(0.15, 0.15),
+            spray_distance=(0.08, 0.08),
+            path_length=(5.0, 8.0),
         )
     )
 
@@ -286,40 +287,36 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
 
-    # =================== 1. 手臂追踪核心任务 (你总结的 4个追踪 + 1个平滑) ===================
-    # (1) 软位置追踪
+    # =================== 1. 手臂追踪核心任务 ===================
+    # Stage 1-2 关闭, Stage 3 由课程逐步打开
     ee_pos_tracking_soft = RewTerm(
         func=mdp.ee_reach_pos_target_soft,
-        weight=2.0,
+        weight=0.0,                                    # Stage 1: off
         params={"command_name": "hand_tracking", "std": 0.10},
     )
-    # (2) 硬位置追踪
     ee_pos_tracking_tight = RewTerm(
         func=mdp.ee_reach_pos_target_tight,
-        weight=3.0,
+        weight=0.0,                                    # Stage 1: off
         params={"command_name": "hand_tracking", "std": 0.02},
     )
-    # (3) 姿态追踪
     ee_rot_tracking = RewTerm(
         func=mdp.reach_rot_target,
-        weight=2.5,
+        weight=0.0,                                    # Stage 1: off
         params={"command_name": "hand_tracking", "std": 0.15},
     )
-    # (4) 速度追踪 (注意：这里对应你 rewards.py 里的函数名 ee_velocity_tracking)
     ee_tangential_speed_tracking = RewTerm(
         func=mdp.ee_velocity_tracking,
-        weight=2.0,
+        weight=0.0,                                    # Stage 1: off
         params={
             "command_name": "hand_tracking",
             "asset_cfg": SceneEntityCfg("robot"),
-            "ee_body_name": "right_wrist_yaw_link",  # 确保这是真实的连杆名
+            "ee_body_name": "right_wrist_yaw_link",
             "std": 0.08,
         },
     )
-    # (5) 动作平滑度惩罚
     action_smoothness = RewTerm(
         func=mdp.ee_action_smoothness_penalty,
-        weight=-0.005,
+        weight=0.0,                                    # Stage 1: off
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
@@ -373,27 +370,38 @@ class RewardsCfg:
     )
 
 
-    # =================== 3. 基座追踪与姿态  ===================
+    # =================== 3. 基座追踪与姿态 ===================
+    # Stage 1: 底盘移动主导, 权重由课程动态调整
     track_base_vel = RewTerm(
         func=mdp.track_base_vel_command,
-        weight=1.5,
+        weight=2.0,                                    # Stage 1: 高权重
         params={"command_name": "hand_tracking", "std": 0.5},
     )
     track_body_height = RewTerm(
         func=mdp.track_body_height_command,
-        weight=1.0,
+        weight=1.5,                                    # Stage 1: 适度权重
         params={"command_name": "hand_tracking", "std": 0.2},
     )
     base_face_surface_normal = RewTerm(
         func=mdp.base_face_surface_normal,
-        weight=2.0,
+        weight=2.0,                                    # Stage 1: 高权重
         params={"command_name": "hand_tracking", "std": 0.35}
     )
+    com_support = RewTerm(
+        func=mdp.com_support_tracking,
+        weight=1.0,                                    # Stage 1: 加强 CoM 约束
+        params={
+            "std": 0.30,
+            "asset_cfg": SceneEntityCfg("robot"),
+            "support_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+        },
+    )
 
-    # =================== 4. 手臂舒适姿态  ===================
+    # =================== 4. 手臂舒适姿态 ===================
+    # Stage 1: 强力约束手臂锁默认姿态, 课程中逐步解放右臂
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.01,
+        weight=-2.0,                                   # Stage 1: 强力锁臂
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
@@ -421,7 +429,7 @@ class RewardsCfg:
     # joint_deviation_arms 已移至上方 section 4
     joint_deviation_waists = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1,
+        weight=-1.0,                                   # Stage 1: 腰部保持默认
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
@@ -433,7 +441,7 @@ class RewardsCfg:
     )
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.5,
+        weight=-0.5,                                   # Stage 1: 腿部放松
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
     )
 
@@ -493,7 +501,7 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    pass
+    tracking_levels = CurrTerm(func=mdp.tracking_curriculum_levels)
 
 
 
@@ -539,6 +547,72 @@ class RobotEnvCfg(ManagerBasedRLEnvCfg):
                 self.scene.terrain.terrain_generator.curriculum = False
 
 
+PLAY_DIFFICULTY_LEVEL = 2
+"""Play difficulty preset. Use 1-5, or set to 0 and edit PLAY_CUSTOM_DIFFICULTY."""
+
+PLAY_DIFFICULTY_PRESETS = {
+    # 难度递增主要体现在路径复杂度和墙面噪声
+    1: {
+        "velocity": (0.15, 0.15),
+        "spray_distance": (0.08, 0.08),
+        "path_length": (1.0, 2.0),
+        "num_chunks": 1,
+        "max_path_type": 0,                           # 仅直线
+        "amplitude_range": (0.0, 0.0),
+        "frequency_range": (0.0, 0.0),
+        "x_noise_scale": 0.0,
+        "normal_noise_scale": 0.0,
+    },
+    2: {
+        "velocity": (0.15, 0.15),
+        "spray_distance": (0.08, 0.08),
+        "path_length": (2.0, 4.0),
+        "num_chunks": 2,
+        "max_path_type": 1,                           # 直线 + sine
+        "amplitude_range": (0.03, 0.10),
+        "frequency_range": (1.0, 3.0),
+        "x_noise_scale": 0.0002,
+        "normal_noise_scale": 0.005,
+    },
+    3: {
+        "velocity": (0.15, 0.15),
+        "spray_distance": (0.08, 0.08),
+        "path_length": (3.0, 5.0),
+        "num_chunks": 3,
+        "max_path_type": 3,                           # 全部类型
+        "amplitude_range": (0.05, 0.15),
+        "frequency_range": (2.0, 6.0),
+        "x_noise_scale": 0.0008,
+        "normal_noise_scale": 0.01,
+    },
+    4: {
+        "velocity": (0.15, 0.15),
+        "spray_distance": (0.08, 0.08),
+        "path_length": (4.0, 6.0),
+        "num_chunks": 4,
+        "max_path_type": 3,
+        "amplitude_range": (0.05, 0.20),
+        "frequency_range": (3.0, 8.0),
+        "x_noise_scale": 0.0012,
+        "normal_noise_scale": 0.015,
+    },
+    5: {
+        "velocity": (0.15, 0.15),
+        "spray_distance": (0.08, 0.08),
+        "path_length": (5.0, 8.0),                    # 满难度
+        "num_chunks": 5,
+        "max_path_type": 3,
+        "amplitude_range": (0.10, 0.35),
+        "frequency_range": (3.0, 10.0),
+        "x_noise_scale": 0.0012,
+        "normal_noise_scale": 0.02,
+    },
+}
+
+PLAY_CUSTOM_DIFFICULTY = None
+"""Optional custom play difficulty dict. Set PLAY_DIFFICULTY_LEVEL = 0 to use it."""
+
+
 @configclass
 class RobotPlayEnvCfg(RobotEnvCfg):
     """测试(play)环境配置，继承自训练配置，并覆盖适合推理的设置。"""
@@ -555,14 +629,30 @@ class RobotPlayEnvCfg(RobotEnvCfg):
             self.scene.terrain.terrain_generator.num_rows = 5
             self.scene.terrain.terrain_generator.num_cols = 5
 
-        # ========== 2. 命令：直接使用最高难度（limit_ranges） ==========
+        # ========== 2. 命令：使用可配置 play 难度 ==========
+        self.curriculum.tracking_levels = None
+
+        if PLAY_DIFFICULTY_LEVEL == 0:
+            if PLAY_CUSTOM_DIFFICULTY is None:
+                raise ValueError("PLAY_DIFFICULTY_LEVEL is 0, but PLAY_CUSTOM_DIFFICULTY is None.")
+            difficulty = PLAY_CUSTOM_DIFFICULTY
+        else:
+            difficulty = PLAY_DIFFICULTY_PRESETS[PLAY_DIFFICULTY_LEVEL]
+
         cmd = self.commands.hand_tracking
-        # 将当前 ranges 替换为 limit_ranges 实例（包含速度、喷涂距离、路径长度等）
-        cmd.ranges = cmd.limit_ranges
+        cmd.ranges.velocity = difficulty["velocity"]
+        cmd.ranges.spray_distance = difficulty["spray_distance"]
+        cmd.ranges.path_length = difficulty["path_length"]
+        cmd.num_chunks = difficulty["num_chunks"]
+        cmd.max_path_type = difficulty["max_path_type"]
+        cmd.amplitude_range = difficulty["amplitude_range"]
+        cmd.frequency_range = difficulty["frequency_range"]
+        cmd.x_noise_scale = difficulty["x_noise_scale"]
+        cmd.normal_noise_scale = difficulty["normal_noise_scale"]
         # 开启可视化，便于观察路径和目标点（可选）
         cmd.debug_vis = True
 
-        # ========== 3. 课程已禁用（无课程设计） ==========
+        # ========== 3. 课程已禁用（play 难度由 PLAY_DIFFICULTY_LEVEL 控制） ==========
 
         # ========== 4. 固定随机化事件 ==========
         # 移除 startup 随机化（摩擦、质量）

@@ -375,8 +375,8 @@ class EventCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "yaw_range": (-3.14, 3.14),
-            "xy_range": {"x": (-4.0, 4.0), "y": (-4.0, 4.0)},
-            "max_attempts": 20,
+            "xy_range": {"x": (-5.5, 5.5), "y": (-5.5, 5.5)},
+            "max_attempts": 50,
             "velocity_range": {
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),

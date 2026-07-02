@@ -103,6 +103,50 @@ def upward(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("r
     return reward
 
 
+def com_support_tracking(
+    env: ManagerBasedRLEnv,
+    std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    support_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward keeping the horizontal CoM projection near the feet support midpoint."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    data = asset.data
+
+    if hasattr(data, "root_com_pos_w"):
+        com_xy = data.root_com_pos_w[:, :2]
+    elif hasattr(data, "com_pos_w"):
+        com_xy = data.com_pos_w[:, :2]
+    elif hasattr(data, "body_com_pos_w"):
+        body_com_pos_w = data.body_com_pos_w
+        body_masses = None
+        for mass_attr in ("default_mass", "body_masses", "body_mass"):
+            if hasattr(data, mass_attr):
+                body_masses = getattr(data, mass_attr)
+                break
+        if body_masses is not None:
+            masses = body_masses.to(body_com_pos_w.device)
+            if masses.dim() == 1:
+                masses = masses.unsqueeze(0)
+            total_mass = torch.clamp(torch.sum(masses, dim=1, keepdim=True), min=1.0e-6)
+            com_xy = torch.sum(body_com_pos_w[:, :, :2] * masses.unsqueeze(-1), dim=1) / total_mass
+        else:
+            com_xy = torch.mean(body_com_pos_w[:, :, :2], dim=1)
+    else:
+        # Conservative fallback for IsaacLab versions that do not expose CoM buffers.
+        com_xy = data.root_pos_w[:, :2]
+
+    support_body_ids = support_cfg.body_ids
+    if support_body_ids is None or len(support_body_ids) < 2:
+        support_xy = data.root_pos_w[:, :2]
+    else:
+        feet_xy = data.body_pos_w[:, support_body_ids, :2]
+        support_xy = torch.mean(feet_xy, dim=1)
+
+    error = torch.sum(torch.square(com_xy - support_xy), dim=1)
+    return torch.exp(-error / std**2)
+
+
 def joint_position_penalty(
         env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, stand_still_scale: float, velocity_threshold: float
 ) -> torch.Tensor:

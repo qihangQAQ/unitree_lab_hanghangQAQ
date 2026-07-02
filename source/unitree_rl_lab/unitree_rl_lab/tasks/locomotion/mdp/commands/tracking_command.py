@@ -167,10 +167,18 @@ class HandTrackingCommand(CommandTerm):
         
         rand_vals = torch.rand(n, num_chunks, 1, device=device)
         chunk_types = torch.zeros(n, num_chunks, 1, dtype=torch.long, device=device)
-        chunk_types[rand_vals < 0.30] = 0
-        chunk_types[(rand_vals >= 0.30) & (rand_vals < 0.50)] = 1
-        chunk_types[(rand_vals >= 0.50) & (rand_vals < 0.75)] = 2
-        chunk_types[rand_vals >= 0.75] = 3
+        if self.cfg.max_path_type >= 3:
+            chunk_types[rand_vals < 0.30] = 0
+            chunk_types[(rand_vals >= 0.30) & (rand_vals < 0.50)] = 1
+            chunk_types[(rand_vals >= 0.50) & (rand_vals < 0.75)] = 2
+            chunk_types[rand_vals >= 0.75] = 3
+        elif self.cfg.max_path_type == 2:
+            chunk_types[rand_vals < 0.40] = 0
+            chunk_types[(rand_vals >= 0.40) & (rand_vals < 0.75)] = 1
+            chunk_types[rand_vals >= 0.75] = 2
+        elif self.cfg.max_path_type == 1:
+            chunk_types[rand_vals < 0.50] = 0
+            chunk_types[rand_vals >= 0.50] = 1
 
         A = torch.empty(n, num_chunks, 1, device=device).uniform_(*self.cfg.amplitude_range)
         omega = torch.empty(n, num_chunks, 1, device=device).uniform_(*self.cfg.frequency_range)
@@ -354,8 +362,21 @@ class HandTrackingCommand(CommandTerm):
         self.command_b[env_ids, 25] = tangent_b[:, 0] * speeds  # v_x_b
         self.command_b[env_ids, 26] = tangent_b[:, 1] * speeds  # v_y_b
 
-        # 身体期望高度命令 (暂时固定站立高度，后续可改为动态)
-        self.command_b[env_ids, 27] = 0.78
+        # 身体期望高度命令：从当前轨迹点的 EE 目标世界 Z 反推
+        # Stage 1 时课程会设置 curriculum_fixed_height 来覆盖此计算
+        if hasattr(self, 'curriculum_fixed_height') and self.curriculum_fixed_height is not None:
+            self.command_b[env_ids, 27] = self.curriculum_fixed_height
+        else:
+            # 获取 0cm 前瞻点的墙面位置，计算 EE 目标世界 Z
+            curr_s_local = self.current_arc_length[env_ids]
+            surf_p_0, surf_n_0 = self._get_interpolated_target(env_ids, curr_s_local)
+            total_offset = self.cfg.gun_length + self.env_spray_dists[env_ids]
+            target_ee_z = (surf_p_0 + surf_n_0 * total_offset.unsqueeze(1))[:, 2]
+            # G1 默认站立时末端比基座高约 0.25m (世界 Z 轴)
+            ee_default_z_offset = 0.25
+            h_desired = target_ee_z - ee_default_z_offset
+            h_desired = torch.clamp(h_desired, min=0.55, max=0.80)
+            self.command_b[env_ids, 27] = h_desired
 
         self.current_surf_n_w[env_ids] = n_curr
 
@@ -398,6 +419,7 @@ class HandTrackingCommandCfg(CommandTermCfg):
     # 拼接轨迹专有配置 (新增)
     # ==========================
     num_chunks: int = 5                                  # 每条路径被分成的形态段数
+    max_path_type: int = 3                               # 0=line, 1=+sine, 2=+circle, 3=+square
     amplitude_range: tuple[float, float] = (0.15, 0.40)  # 波浪/圆环的振幅范围
     frequency_range: tuple[float, float] = (8.0, 15.0)   # 频率范围
     x_noise_scale: float = 0.0012                        # 墙面不平整度 (X 轴随机游走噪声)。
