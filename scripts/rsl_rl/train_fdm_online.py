@@ -71,6 +71,7 @@ parser.add_argument("--small_motion_ratio", type=float, default=0.1)
 parser.add_argument("--small_motion_threshold", type=float, default=1.0)
 parser.add_argument("--height_threshold", type=float, default=None)
 parser.add_argument("--outlier_threshold", type=float, default=10.0)
+parser.add_argument("--no_noise", action="store_true", default=False, help="Disable observation noise during training.")
 parser.add_argument("--save_round_datasets", action="store_true", default=False)
 
 AppLauncher.add_app_launcher_args(parser)
@@ -98,7 +99,7 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
 from isaaclab_tasks.utils import get_checkpoint_path
 
 import cli_args
-from unitree_rl_lab.tasks.fdm.training import OfflineFDMTrainer, OfflineTrainingConfig
+from unitree_rl_lab.tasks.fdm.training import FDMTrainer, FDMTrainingConfig
 from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
 
 
@@ -114,14 +115,14 @@ class SE2CommandSampler:
         ang_vel_z_range: tuple[float, float],
         linear_ratio: float = 0.6,
         normal_ratio: float = 0.4,
-        max_beta: float = 0.3,
+        min_correlation: float = 0.3,
         sigma_scale: float = 0.3,
     ):
         self.num_envs = num_envs
         self.device = device
         self._limits_min = torch.tensor([lin_vel_x_range[0], lin_vel_y_range[0], ang_vel_z_range[0]], device=device)
         self._limits_max = torch.tensor([lin_vel_x_range[1], lin_vel_y_range[1], ang_vel_z_range[1]], device=device)
-        self._max_beta = max_beta
+        self._min_correlation = min_correlation
         self._max_sigma = sigma_scale * (self._limits_max - self._limits_min)
         self._linear_n = int(num_envs * linear_ratio)
         self._normal_n = int(num_envs * normal_ratio)
@@ -147,9 +148,11 @@ class SE2CommandSampler:
     def _update_linear_correlated(self):
         if self._linear_n == 0:
             return
-        beta = torch.rand(self._linear_n, 1, device=self.device) * self._max_beta
+        opposite_beta = torch.rand(self._linear_n, 1, device=self.device) * (1.0 - self._min_correlation)
         rand_cmds = self._random_commands(self._linear_n)
-        self.commands[: self._linear_n] = self.commands[: self._linear_n] * (1 - beta) + rand_cmds * beta
+        self.commands[: self._linear_n] = (
+            self.commands[: self._linear_n] * (1 - opposite_beta) + rand_cmds * opposite_beta
+        )
 
     def _update_normal_correlated(self):
         if self._normal_n == 0:
@@ -394,13 +397,33 @@ def collect_round(
                     _inject_command(base_env, se2_cmd)
 
                 feet_all_contact = _update_feet_contact_seen(base_env, feet_body_ids, feet_contact_seen, dones=dones)
-                history_due = (env_step_counter % history_collection_interval).to(torch.int) == 0
-                history_mask = (~buffer.is_filled.to(base_env.device)) & feet_all_contact & history_due
-                history_env_ids_device = all_env_ids_device[history_mask]
-                if len(history_env_ids_device) > 0:
+
+                # ---- collision force-record (capture collision frames even
+                #      when they fall between regular recording intervals) ----
+                unfilled = ~buffer.is_filled.to(base_env.device)
+                state_fetched = False
+                if unfilled.any():
                     state = _get_fdm_state(base_env)
+                    state_fetched = True
+                    collision_now = state[:, 7] > 0.5
+                    collision_mask = collision_now & unfilled & feet_all_contact
+                    if collision_mask.any():
+                        coll_env_ids = all_env_ids_device[collision_mask]
+                        proprio = _get_fdm_proprioceptive(base_env)
+                        buffer.update_history(coll_env_ids.cpu(), state.cpu(), proprio.cpu())
+                        height_scan = _get_fdm_height_scan(base_env)
+                        buffer.add_trajectory_point(coll_env_ids.cpu(), se2_cmd.cpu(), height_scan.cpu())
+                        last_record_step[coll_env_ids] = env_step_counter[coll_env_ids]
+
+                # ---- regular history update ----
+                history_due = (env_step_counter % history_collection_interval).to(torch.int) == 0
+                history_mask = unfilled & feet_all_contact & history_due
+                if history_mask.any():
+                    history_env_ids = all_env_ids_device[history_mask]
+                    if not state_fetched:
+                        state = _get_fdm_state(base_env)
                     proprio = _get_fdm_proprioceptive(base_env)
-                    buffer.update_history(history_env_ids_device.cpu(), state.cpu(), proprio.cpu())
+                    buffer.update_history(history_env_ids.cpu(), state.cpu(), proprio.cpu())
 
                 env_step_counter[feet_all_contact] += 1
                 obs = next_obs
@@ -480,8 +503,8 @@ def collect_round(
     return buffer.to_payload(meta)
 
 
-def _training_cfg() -> OfflineTrainingConfig:
-    return OfflineTrainingConfig(
+def _training_cfg() -> FDMTrainingConfig:
+    return FDMTrainingConfig(
         dataset=None,
         output_root=args_cli.output_root,
         run_name=args_cli.run_name,
@@ -505,6 +528,7 @@ def _training_cfg() -> OfflineTrainingConfig:
         small_motion_threshold=args_cli.small_motion_threshold,
         height_threshold=args_cli.height_threshold,
         outlier_threshold=args_cli.outlier_threshold,
+        apply_noise=not args_cli.no_noise,
     )
 
 
@@ -595,7 +619,7 @@ def main():
             dims=dims,
             timing=timing,
         )
-        trainer = OfflineFDMTrainer(
+        trainer = FDMTrainer(
             cfg,
             payload=train_payload,
             val_payload=val_payload,

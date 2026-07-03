@@ -1,5 +1,5 @@
-"""Offline FDM model components."""
+"""FDM model components."""
 
-from .offline_fdm_model import OfflineFDMConfig, OfflineFDMModel
+from .fdm_model import FDMConfig, FDMModel
 
-__all__ = ["OfflineFDMConfig", "OfflineFDMModel"]
+__all__ = ["FDMConfig", "FDMModel"]

@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 
 
 def load_fdm_payload(path: str | Path) -> dict[str, Any]:
-    """Load a rollout pickle produced by ``collect_fdm_rollouts.py``."""
+    """Load a rollout pickle produced by the FDM data collector."""
     with open(Path(path).expanduser(), "rb") as f:
         payload = pickle.load(f)
     if "data" not in payload:
@@ -19,7 +19,7 @@ def load_fdm_payload(path: str | Path) -> dict[str, Any]:
     return payload
 
 
-class OfflineFDMTrajectoryDataset(Dataset):
+class FDMTrajectoryDataset(Dataset):
     """Slice collected FDM rollouts into fixed-horizon training examples."""
 
     def __init__(

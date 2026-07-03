@@ -1,4 +1,4 @@
-"""Height-scan FDM model for offline training on collected Unitree rollouts."""
+"""Height-scan FDM model for training on collected Unitree rollouts."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from torch import nn
 
 
 @dataclass
-class OfflineFDMConfig:
-    """Configuration for the offline FDM model."""
+class FDMConfig:
+    """Configuration for the FDM model."""
 
     state_dim: int
     proprio_dim: int
@@ -161,10 +161,10 @@ class EmpiricalNormalization(nn.Module):
         self._std = torch.sqrt(self._var.clamp_min(1e-8))
 
 
-class OfflineFDMModel(nn.Module):
+class FDMModel(nn.Module):
     """FDM height-scan multi-step velocity residual model."""
 
-    def __init__(self, cfg: OfflineFDMConfig, device: str | torch.device = "cuda"):
+    def __init__(self, cfg: FDMConfig, device: str | torch.device = "cuda"):
         super().__init__()
         self.cfg = cfg
         self.device_name = str(device)
@@ -239,7 +239,7 @@ class OfflineFDMModel(nn.Module):
         corr_vel = corr_vel + actions
 
         corr_distance = corr_vel * self.cfg.command_timestep
-        cumulative_yaw = corr_distance[..., 2].cumsum(dim=1)
+        cumulative_yaw = corr_distance[..., 2].clone().cumsum(dim=1)
         rot = torch.stack(
             [
                 torch.stack([torch.cos(cumulative_yaw), -torch.sin(cumulative_yaw)], dim=-1),

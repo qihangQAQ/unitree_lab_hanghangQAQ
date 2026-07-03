@@ -5,7 +5,7 @@
 try:
     from isaaclab_tasks.utils import import_packages
 except ModuleNotFoundError:
-    # Offline utilities such as FDM dataset training can run without IsaacLab.
+    # FDM dataset utilities can run without IsaacLab.
     import_packages = None
 
 if import_packages is not None:

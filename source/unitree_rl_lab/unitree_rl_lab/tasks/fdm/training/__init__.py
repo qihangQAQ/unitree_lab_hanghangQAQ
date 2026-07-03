@@ -1,6 +1,6 @@
-"""Offline FDM training utilities."""
+"""FDM training utilities."""
 
-from .offline_dataset import OfflineFDMTrajectoryDataset, load_fdm_payload
-from .offline_trainer import OfflineFDMTrainer, OfflineTrainingConfig
+from .fdm_dataset import FDMTrajectoryDataset, load_fdm_payload
+from .fdm_trainer import FDMTrainer, FDMTrainingConfig
 
-__all__ = ["OfflineFDMTrajectoryDataset", "OfflineFDMTrainer", "OfflineTrainingConfig", "load_fdm_payload"]
+__all__ = ["FDMTrajectoryDataset", "FDMTrainer", "FDMTrainingConfig", "load_fdm_payload"]

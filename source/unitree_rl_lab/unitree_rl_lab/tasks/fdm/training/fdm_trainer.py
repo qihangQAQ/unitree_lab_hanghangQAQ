@@ -1,4 +1,4 @@
-"""Offline trainer for the Unitree FDM model."""
+"""Trainer for the Unitree FDM model."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from unitree_rl_lab.tasks.fdm.model import OfflineFDMConfig, OfflineFDMModel
-from unitree_rl_lab.tasks.fdm.training.offline_dataset import OfflineFDMTrajectoryDataset, load_fdm_payload
+from unitree_rl_lab.tasks.fdm.model import FDMConfig, FDMModel
+from unitree_rl_lab.tasks.fdm.training.fdm_dataset import FDMTrajectoryDataset, load_fdm_payload
 
 
 @dataclass
-class OfflineTrainingConfig:
+class FDMTrainingConfig:
     dataset: str | None = None
     output_root: str = "logs/fdm/unitree_g1_fdm"
     run_name: str | None = None
@@ -40,17 +40,19 @@ class OfflineTrainingConfig:
     small_motion_threshold: float = 1.0
     height_threshold: float | None = None
     outlier_threshold: float = 10.0
+    apply_noise: bool = False
+    """Apply additive uniform noise to observations during training, matching reference FDM."""
 
 
-class OfflineFDMTrainer:
-    """Train an FDM model from one collected rollout pickle."""
+class FDMTrainer:
+    """Train an FDM model from collected rollout data."""
 
     def __init__(
         self,
-        cfg: OfflineTrainingConfig,
+        cfg: FDMTrainingConfig,
         payload: dict[str, Any] | None = None,
         val_payload: dict[str, Any] | None = None,
-        model: OfflineFDMModel | None = None,
+        model: FDMModel | None = None,
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau | None = None,
         log_dir: str | Path | None = None,
@@ -59,10 +61,10 @@ class OfflineFDMTrainer:
         self.device = torch.device(cfg.device if torch.cuda.is_available() or not cfg.device.startswith("cuda") else "cpu")
         if payload is None:
             if cfg.dataset is None:
-                raise ValueError("OfflineFDMTrainer needs either cfg.dataset or an in-memory payload.")
+                raise ValueError("FDMTrainer needs either cfg.dataset or an in-memory payload.")
             payload = load_fdm_payload(cfg.dataset)
         val_payload = payload if val_payload is None else val_payload
-        self.train_dataset = OfflineFDMTrajectoryDataset(
+        self.train_dataset = FDMTrajectoryDataset(
             payload,
             prediction_horizon=cfg.prediction_horizon,
             num_samples=cfg.num_samples,
@@ -80,7 +82,7 @@ class OfflineFDMTrainer:
             outlier_threshold=cfg.outlier_threshold,
         )
         val_samples = max(1, int(cfg.num_samples * cfg.val_ratio / max(1.0 - cfg.val_ratio, 1e-6)))
-        self.val_dataset = OfflineFDMTrajectoryDataset(
+        self.val_dataset = FDMTrajectoryDataset(
             val_payload,
             prediction_horizon=cfg.prediction_horizon,
             num_samples=val_samples,
@@ -97,7 +99,7 @@ class OfflineFDMTrainer:
             height_threshold=cfg.height_threshold,
             outlier_threshold=cfg.outlier_threshold,
         )
-        model_cfg = OfflineFDMConfig(
+        model_cfg = FDMConfig(
             state_dim=self.train_dataset.state_dim,
             proprio_dim=self.train_dataset.proprio_dim,
             height_scan_shape=self.train_dataset.height_scan_shape,
@@ -106,7 +108,7 @@ class OfflineFDMTrainer:
             command_timestep=self.train_dataset.command_timestep,
         )
         if model is None:
-            self.model = OfflineFDMModel(model_cfg, device=self.device)
+            self.model = FDMModel(model_cfg, device=self.device)
         else:
             self.model = model.to(self.device)
             if self.model.cfg.to_dict() != model_cfg.to_dict():
@@ -119,6 +121,12 @@ class OfflineFDMTrainer:
         )
         self.log_dir = Path(log_dir).expanduser().resolve() if log_dir is not None else self._make_log_dir()
         self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # ---- per-dim proprioceptive noise bounds (matching reference FDM) ----
+        self._proprio_noise_min: torch.Tensor | None = None
+        self._proprio_noise_max: torch.Tensor | None = None
+        if cfg.apply_noise:
+            self._proprio_noise_min, self._proprio_noise_max = self._build_proprio_noise_bounds()
 
     def train(self) -> dict[str, Any]:
         if self.cfg.inspect_only:
@@ -206,6 +214,14 @@ class OfflineFDMTrainer:
 
     def _prepare_batch(self, batch) -> tuple[tuple[torch.Tensor, ...], torch.Tensor, torch.Tensor]:
         state_history, proprio, extero, actions, add_extero, target, perfect_velocity = batch
+
+        # ---- observation noise (matching reference FDM, training only) ----
+        if self.model.training and self._proprio_noise_min is not None:
+            noise_min = self._proprio_noise_min.to(proprio.device)
+            noise_max = self._proprio_noise_max.to(proprio.device)
+            proprio = proprio + torch.empty_like(proprio).uniform_() * (noise_max - noise_min) + noise_min
+            extero = extero + torch.empty_like(extero).uniform_(-0.01, 0.01)
+
         model_in = (
             state_history.to(self.device, non_blocking=True),
             proprio.to(self.device, non_blocking=True),
@@ -221,6 +237,48 @@ class OfflineFDMTrainer:
         log_dir = Path(self.cfg.output_root).expanduser().resolve() / name
         log_dir.mkdir(parents=True, exist_ok=True)
         return log_dir
+
+    def _build_proprio_noise_bounds(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Build per-dim uniform noise bounds matching reference FDM noise levels.
+
+        Proprioceptive layout (same for ANYmal-D and G1, differing only in joint count):
+            [vel_cmd(3), gravity(3), base_lin_vel(3), base_ang_vel(3),
+             joint_block_0, ..., joint_block_9]
+        where each joint_block has n_joints entries and
+        n_joints = (proprio_dim - 12) // 10.
+        """
+        pdim = self.train_dataset.proprio_dim
+        n_joints = (pdim - 12) // 10
+        noise_min = torch.zeros(pdim)
+        noise_max = torch.zeros(pdim)
+
+        # non-joint terms (first 12 dims)
+        noise_min[0:3] = 0.0;   noise_max[0:3] = 0.0     # vel_cmd: no noise
+        noise_min[3:6] = -0.05; noise_max[3:6] = 0.05     # projected_gravity
+        noise_min[6:9] = -0.1;  noise_max[6:9] = 0.1      # base_lin_vel
+        noise_min[9:12] = -0.2; noise_max[9:12] = 0.2     # base_ang_vel
+
+        def _block(start: int) -> slice:
+            return slice(start, start + n_joints)
+
+        # block 0: joint_torque — no noise
+        # block 1: joint_pos — ±0.01
+        noise_min[_block(12 + 1 * n_joints)] = -0.01
+        noise_max[_block(12 + 1 * n_joints)] = 0.01
+        # block 2: joint_vel — ±1.5
+        noise_min[_block(12 + 2 * n_joints)] = -1.5
+        noise_max[_block(12 + 2 * n_joints)] = 1.5
+        # blocks 3-5: joint_pos_error_idx{0,2,4} — ±0.01
+        for b in (3, 4, 5):
+            noise_min[_block(12 + b * n_joints)] = -0.01
+            noise_max[_block(12 + b * n_joints)] = 0.01
+        # blocks 6-7: joint_vel_idx{2,4} — ±1.5
+        for b in (6, 7):
+            noise_min[_block(12 + b * n_joints)] = -1.5
+            noise_max[_block(12 + b * n_joints)] = 1.5
+        # blocks 8-9: last_action, second_last_action — no noise
+
+        return noise_min, noise_max
 
     def _save_config(self):
         params_dir = self.log_dir / "params"
